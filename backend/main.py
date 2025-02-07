@@ -1,54 +1,71 @@
-from fastapi import FastAPI
-import psycopg2
+from fastapi import FastAPI, Query, HTTPException
+from sqlalchemy import create_engine, Column, Integer, String, Text, Date, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 import requests
 import os
+import logging
 
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
 app = FastAPI()
 
-# Connect to PostgreSQL
-def connect_db():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+# Get database URL from Railway environment variables
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")  # Default to SQLite if missing
+PORT = int(os.getenv("PORT", 8000))
 
-# Fetch case law from CourtListener API
-def fetch_case_law():
-    API_URL = "https://www.courtlistener.com/api/rest/v3/opinions/"
-    HEADERS = {"Authorization": f"Token {os.getenv('COURTLISTENER_API_TOKEN')}"}
-    
-    params = {
-        "court": ["scotus", "ca7"],  # Supreme Court & Seventh Circuit
-        "date_filed__gte": "2023-01-01",  # Cases from 2023 onward
-        "order_by": "-date_filed",
-        "page_size": 10  # Number of cases to fetch
-    }
+# SQLAlchemy Database Setup
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-    response = requests.get(API_URL, headers=HEADERS, params=params)
+# Define Case Law Table
+class Case(Base):
+    __tablename__ = "cases"
 
-    if response.status_code == 200:
-        return response.json()["results"]
-    else:
-        return []
+    id = Column(Integer, primary_key=True, index=True)
+    case_name = Column(String, nullable=False)
+    citation = Column(String, nullable=False)
+    court = Column(String, nullable=False)
+    jurisdiction = Column(String, nullable=False)
+    date_decided = Column(Date, nullable=False)
+    summary = Column(Text, nullable=False)
+    full_text = Column(Text, nullable=False)
 
-# Route to fetch and store cases in the database
-@app.get("/fetch-cases/")
-async def fetch_and_store_cases():
-    cases = fetch_case_law()
+# Create the tables in the database
+Base.metadata.create_all(bind=engine)
 
-    conn = connect_db()
-    cursor = conn.cursor()
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-    for case in cases:
-        cursor.execute("""
-            INSERT INTO cases (case_name, court, jurisdiction, date_filed, citation, full_text_url, summary)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (full_text_url) DO NOTHING;
-        """, (
-            case["case_name"], case["court"], "Federal",
-            case["date_filed"], case.get("citation", ""),
-            case["absolute_url"], case.get("plain_text", "")
-        ))
+# Test Route (Check if API is Running)
+@app.get("/")
+def home():
+    return {"message": "Case Law Search API is Running"}
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+# Search Endpoint (Will Later Connect to CourtListener)
+@app.get("/search")
+def search_cases(query: str = Query(..., description="Enter a legal keyword or case name")):
+    try:
+        # Placeholder response - replace with CourtListener API call later
+        results = [
+            {"case_name": "Terry v. Ohio", "citation": "392 U.S. 1 (1968)", "summary": "Stop and frisk ruling."},
+            {"case_name": "Miranda v. Arizona", "citation": "384 U.S. 436 (1966)", "summary": "Miranda rights established."}
+        ]
+        return {"query": query, "cases": results}
+    except Exception as e:
+        logger.error(f"Error during search: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    return {"message": f"Stored {len(cases)} cases in the database."}
+# Run the server (For Local Development)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
