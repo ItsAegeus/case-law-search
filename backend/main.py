@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import logging
-import uvicorn
 
 # Initialize FastAPI app
 app = FastAPI()
