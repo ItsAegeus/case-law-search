@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 requests
+openai
 sqlalchemy
 psycopg2-binary  # Only needed if using PostgreSQL
 python-dotenv  # If using .env files for configuration (optional)
