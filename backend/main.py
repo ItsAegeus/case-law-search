@@ -29,7 +29,7 @@ def home():
     return JSONResponse(content={
         "message": "Welcome to the Case Law Search API!",
         "instructions": "Use /search?query=your_search_term to search case law."
-    }, status_code=200, media_type="application/json", indent=4)
+    })
 
 @app.get("/search")
 def search_case_law(query: str):
@@ -54,7 +54,7 @@ def search_case_law(query: str):
         for result in data.get("results", []):
             # ✅ Fix: Ensure 'court' is a dictionary before calling .get()
             court_info = result.get("court", "Unknown Court")
-            if not isinstance(court_info, dict):  
+            if isinstance(court_info, str):  
                 court_name = "Unknown Court"
             else:
                 court_name = court_info.get("name", "Unknown Court")
@@ -73,13 +73,13 @@ def search_case_law(query: str):
                 "message": "No cases found for this query.",
                 "query": query,
                 "cases": []
-            }, status_code=200, media_type="application/json", indent=4)
+            })
 
         return JSONResponse(content={
             "message": f"✅ {len(cases)} case(s) found for query: '{query}'.",
             "query": query,
             "results": cases
-        }, status_code=200, media_type="application/json", indent=4)
+        })
 
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Failed to fetch case law data: {str(e)}")
