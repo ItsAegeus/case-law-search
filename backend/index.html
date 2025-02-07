@@ -1,1 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Case Law Search</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+        }
+        input {
+            padding: 10px;
+            width: 300px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .results {
+            margin-top: 20px;
+            text-align: left;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .case {
+            border-bottom: 1px solid #ccc;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
 
+    <h1>Case Law Search</h1>
+    <input type="text" id="searchQuery" placeholder="Enter search term..." />
+    <button onclick="searchCases()">Search</button>
+
+    <div class="results" id="results"></div>
+
+    <script>
+        function searchCases() {
+            const query = document.getElementById("searchQuery").value;
+            if (!query) {
+                alert("Please enter a search term.");
+                return;
+            }
+
+            fetch(`https://case-law-search-production.up.railway.app/search?query=${query}`)
+                .then(response => response.json())
+                .then(data => {
+                    const resultsDiv = document.getElementById("results");
+                    resultsDiv.innerHTML = "";
+
+                    if (!data.results || data.results.length === 0) {
+                        resultsDiv.innerHTML = "<p>No cases found.</p>";
+                        return;
+                    }
+
+                    data.results.forEach(caseLaw => {
+                        const caseDiv = document.createElement("div");
+                        caseDiv.className = "case";
+                        caseDiv.innerHTML = `
+                            <h3>${caseLaw["📌 Case Name"]}</h3>
+                            <p><strong>📜 Citation:</strong> ${caseLaw["📜 Citation"]}</p>
+                            <p><strong>⚖️ Court:</strong> ${caseLaw["⚖️ Court"]}</p>
+                            <p><strong>📅 Date Decided:</strong> ${caseLaw["📅 Date Decided"]}</p>
+                            <p><strong>📄 Summary:</strong> ${caseLaw["📄 Summary"]}</p>
+                            <p><a href="${caseLaw["🔗 Full Case"]}" target="_blank">🔗 Read Full Case</a></p>
+                        `;
+                        resultsDiv.appendChild(caseDiv);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error fetching case law:", error);
+                    alert("An error occurred while fetching case law.");
+                });
+        }
+    </script>
+
+</body>
+</html>
