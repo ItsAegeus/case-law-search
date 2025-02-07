@@ -1,147 +1,98 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-import requests
-import logging
-import json
+import openai
 import os
-import uvicorn
-import openai  # AI-powered case law analysis
-
-# Load OpenAI API key (set in Railway environment variables)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+import logging
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import requests
 
 # Initialize FastAPI app
 app = FastAPI()
 
-# Enable CORS for frontend access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Load OpenAI API Key from Environment Variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Set up logging
+# Validate API Key
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OpenAI API Key is missing! Set it in Railway environment variables.")
+
+openai.api_key = OPENAI_API_KEY  # ✅ Ensure API key is set
+
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 
-# CourtListener API URL
-COURTLISTENER_API_URL = "https://www.courtlistener.com/api/rest/v4/search/"
+# API Model
+class QueryRequest(BaseModel):
+    query: str
 
-# ✅ Serve static files for frontend (Search page)
-if not os.path.exists("static"):
-    os.makedirs("static")
+# Function to fetch case law from CourtListener
+def fetch_case_law(query: str):
+    url = f"https://www.courtlistener.com/api/rest/v4/search/?q={query}&type=o&format=json"
+    response = requests.get(url)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Failed to fetch case law.")
 
-@app.get("/")
-def serve_homepage():
-    """Serve the search page."""
-    index_path = "static/index.html"
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    else:
-        return JSONResponse(content={"error": "index.html not found. Please ensure it is in the 'static' folder."}, status_code=404)
+    return response.json()
 
-@app.get("/search")
-def search_case_law(query: str):
-    """Search for case law based on user input and generate AI summaries."""
-    
-    if not query.strip():
-        raise HTTPException(status_code=400, detail="Error: A query parameter is required.")
-
-    logging.info(f"🔍 Searching case law for: {query}")
-
-    try:
-        # 🔹 Step 1: Search for cases
-        response = requests.get(
-            COURTLISTENER_API_URL,
-            params={"q": query, "type": "o"},
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-        cases = []
-
-        for result in data.get("results", []):
-            case_id = result.get("id")
-            case_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{case_id}/"
-
-            # 🔹 Step 2: Fetch full case details (including summary)
-            try:
-                case_response = requests.get(case_url, timeout=5)
-                case_response.raise_for_status()
-                case_details = case_response.json()
-                case_summary = case_details.get("plain_text", "No summary available").strip()
-
-                # Limit summary length for readability
-                if len(case_summary) > 500:
-                    case_summary = case_summary[:500] + "..."
-
-            except requests.exceptions.RequestException:
-                case_summary = "No summary available"
-
-            # ✅ Fix: Ensure 'court' is a dictionary before calling .get()
-            court_info = result.get("court", "Unknown Court")
-            if isinstance(court_info, str):  
-                court_name = "Unknown Court"
-            else:
-                court_name = court_info.get("name", "Unknown Court")
-
-            # 🔹 Step 3: AI-generated analysis
-            ai_analysis = generate_ai_summary(case_summary)
-
-            cases.append({
-                "📌 Case Name": result.get("caseName", "Unknown"),
-                "📜 Citation": result.get("citation", "No citation available"),
-                "⚖️ Court": court_name,
-                "📅 Date Decided": result.get("dateFiled", "Unknown Date"),
-                "📄 Summary": case_summary,  # ✅ Now includes the full case summary
-                "💡 AI Analysis": ai_analysis,  # ✅ AI-generated legal insight
-                "🔗 Full Case": f"https://www.courtlistener.com/opinion/{case_id}/"
-            })
-
-        response_data = {
-            "message": f"✅ {len(cases)} case(s) found for query: '{query}'.",
-            "query": query,
-            "results": cases
-        }
-
-        # ✅ Pretty-print the JSON response before sending it
-        formatted_json = json.dumps(response_data, indent=4)
-
-        return JSONResponse(content=json.loads(formatted_json))
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"❌ Failed to fetch case law data: {str(e)}")
-        raise HTTPException(status_code=500, detail="❌ Error: Could not fetch case law data.")
-
+# AI Summarization Function
 def generate_ai_summary(case_summary: str) -> str:
-    """Uses OpenAI GPT to summarize and analyze the case law."""
-    if not OPENAI_API_KEY:
-        return "AI Analysis not available (missing API key)."
-
+    """Uses OpenAI GPT to summarize legal cases."""
     try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ Use the new API format
-
-        response = client.chat.completions.create(  # ✅ New syntax
-            model="gpt-4",
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # Change to "gpt-3.5-turbo" if needed
             messages=[
-                {"role": "system", "content": "You are a legal AI assistant that summarizes and explains case law."},
-                {"role": "user", "content": f"Summarize this legal case and explain its significance in simple terms:\n\n{case_summary}"}
+                {"role": "system", "content": "You are a legal AI assistant that summarizes case law."},
+                {"role": "user", "content": f"Summarize this legal case in simple terms:\n\n{case_summary}"}
             ],
             temperature=0.7,
-            max_tokens=150
+            max_tokens=150,
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"}  # ✅ Ensure Bearer token is included
         )
 
-        return response.choices[0].message.content.strip()
+        return response["choices"][0]["message"]["content"].strip()
 
     except Exception as e:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
-        return "AI Analysis unavailable due to an API error."
-        
-# ✅ Ensure FastAPI runs on Railway-compatible settings
+        return "AI Summary unavailable due to API error."
+
+# API Endpoint
+@app.get("/search")
+def search_case_law(query: str):
+    logging.info(f"🔍 Searching case law for: {query}")
+
+    # Fetch raw case data
+    case_data = fetch_case_law(query)
+    results = case_data.get("results", [])
+
+    if not results:
+        return {"message": f"No cases found for query: {query}"}
+
+    # Process case results
+    formatted_cases = []
+    for case in results[:5]:  # Limit to 5 results for readability
+        case_name = case.get("caseName", "Unknown Case")
+        citation = case.get("citation", "No Citation")
+        court = case.get("court", {}).get("name", "Unknown Court")
+        date = case.get("dateFiled", "No Date")
+        summary = case.get("summary", "No summary available.")
+        full_case_link = case.get("absolute_url", "#")
+
+        # Generate AI Summary
+        ai_summary = generate_ai_summary(summary) if summary else "No summary available."
+
+        formatted_cases.append({
+            "Case Name": case_name,
+            "Citation": citation,
+            "Court": court,
+            "Date Decided": date,
+            "Summary": summary,
+            "AI Summary": ai_summary,
+            "Full Case": f"https://www.courtlistener.com{full_case_link}"
+        })
+
+    return {"message": f"{len(formatted_cases)} case(s) found for query: {query}", "results": formatted_cases}
+
+# Run app with Uvicorn
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
