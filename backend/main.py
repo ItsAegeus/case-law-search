@@ -71,29 +71,28 @@ def search_case_law(query: str):
         case_name = case.get("caseName", "Unknown Case")
         citation = case.get("citation", "No Citation")
 
-        # ✅ FIXED: Ensure "court" is a dictionary before accessing "name"
+        # ✅ Ensure "court" is properly checked before accessing "name"
         court_info = case.get("court", {})
         court = court_info["name"] if isinstance(court_info, dict) else "Unknown Court"
 
-        date = case.get("dateFiled", "No Date")
+        date = case.get("dateFiled", "No Date Available")
         summary = case.get("summary", "No summary available.")
         full_case_link = case.get("absolute_url", "#")
 
         # Generate AI Summary
-        ai_summary = generate_ai_summary(summary) if summary else "No summary available."
+        ai_summary = generate_ai_summary(summary) if summary and summary != "No summary available." else "AI Summary not available."
 
         formatted_cases.append({
-            "Case Name": case_name,
-            "Citation": citation,
-            "Court": court,
-            "Date Decided": date,
-            "Summary": summary,
-            "AI Summary": ai_summary,
-            "Full Case": f"https://www.courtlistener.com{full_case_link}"
+            "Case Name": case_name or "Unknown Case",
+            "Citation": citation or "No Citation",
+            "Court": court or "Unknown Court",
+            "Date Decided": date or "No Date Available",
+            "Summary": summary or "No summary available.",
+            "AI Summary": ai_summary or "AI Summary not available.",
+            "Full Case": f"https://www.courtlistener.com{full_case_link}" if full_case_link != "#" else "No link available."
         })
 
     return {"message": f"{len(formatted_cases)} case(s) found for query: {query}", "results": formatted_cases}
-
 
 # Run the FastAPI app with Uvicorn
 if __name__ == "__main__":
