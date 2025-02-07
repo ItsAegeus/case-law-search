@@ -13,7 +13,7 @@ app = FastAPI()
 # Environment Variables
 PORT = int(os.getenv("PORT", 8000))
 COURTLISTENER_API_V4 = "https://www.courtlistener.com/api/v4/search/"
-API_KEY = os.getenv("COURTLISTENER_API_KEY")  # Read API key from Railway environment variables
+API_KEY = os.getenv("COURTLISTENER_API_KEY")  # Read API key from Railway
 
 @app.get("/")
 def home():
@@ -44,15 +44,22 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         # Make request to CourtListener API
         response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
 
+        logger.info(f"Response Status: {response.status_code}")
+        logger.info(f"Response Text: {response.text[:500]}")  # Log only first 500 chars to avoid flooding logs
+
+        # If response is not 200, return raw response
         if response.status_code != 200:
-            logger.error(f"Failed to fetch data from CourtListener v4: {response.text}")
-            raise HTTPException(status_code=500, detail="Failed to fetch case data")
+            return {"error": "Failed to fetch case data", "status_code": response.status_code, "response": response.text}
 
-        data = response.json()
+        # Ensure response is JSON
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError:
+            return {"error": "Invalid JSON response", "response": response.text[:500]}
 
+        # Ensure results exist
         if "results" not in data:
-            logger.error(f"Unexpected API response format: {data}")
-            raise HTTPException(status_code=500, detail="Unexpected API response format")
+            return {"error": "Unexpected API response format", "raw_response": data}
 
         results = []
 
@@ -70,11 +77,11 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
 
     except requests.exceptions.RequestException as e:
         logger.error(f"Request failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to connect to CourtListener")
+        return {"error": "Failed to connect to CourtListener", "details": str(e)}
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return {"error": "Internal server error", "details": str(e)}
 
 # Run the server (For Local Development)
 if __name__ == "__main__":
