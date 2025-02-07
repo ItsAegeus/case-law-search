@@ -31,6 +31,8 @@ def home():
         "instructions": "Use /search?query=your_search_term to search case law."
     })
 
+import json  # Import the json module
+
 @app.get("/search")
 def search_case_law(query: str):
     """Search for case law based on user input."""
@@ -68,18 +70,16 @@ def search_case_law(query: str):
                 "🔗 Full Case": f"https://www.courtlistener.com/opinion/{result.get('id')}/"
             })
 
-        if not cases:
-            return JSONResponse(content={
-                "message": "No cases found for this query.",
-                "query": query,
-                "cases": []
-            })
-
-        return JSONResponse(content={
+        response_data = {
             "message": f"✅ {len(cases)} case(s) found for query: '{query}'.",
             "query": query,
             "results": cases
-        })
+        }
+
+        # ✅ Pretty-print the JSON response before sending it
+        formatted_json = json.dumps(response_data, indent=4)
+
+        return JSONResponse(content=json.loads(formatted_json))
 
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Failed to fetch case law data: {str(e)}")
