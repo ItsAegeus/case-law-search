@@ -2,5 +2,5 @@ fastapi
 uvicorn
 requests
 sqlalchemy
-psycopg2-binary  # For PostgreSQL support
-python-dotenv  # If using .env files for secrets (optional)
+psycopg2-binary  # Only needed if using PostgreSQL
+python-dotenv  # If using .env files for configuration (optional)
