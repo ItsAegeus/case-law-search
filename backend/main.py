@@ -12,23 +12,26 @@ app = FastAPI()
 
 # Environment Variables
 PORT = int(os.getenv("PORT", 8000))
-COURTLISTENER_API_V4 = "https://www.courtlistener.com/api/v4/search/"
-API_KEY = os.getenv("COURTLISTENER_API_KEY")  # Read API key from Railway
+
+# Correct CourtListener API v4 Endpoint for case law (opinions)
+COURTLISTENER_API_V4 = "https://www.courtlistener.com/api/rest/v4/opinions/"
+
+# Read API key from Railway
+API_KEY = os.getenv("COURTLISTENER_API_KEY")
 
 @app.get("/")
 def home():
-    return {"message": "Case Law Search API is Running"}
+    return {"message": "Case Law Search API v4 is Running"}
 
 @app.get("/search")
 def search_cases(query: str = Query(..., description="Enter legal keywords or case name")):
     try:
         logger.info(f"Searching for case law with query: {query}")
 
-        # API v4 parameters
+        # API v4 parameters (use "search" instead of "q")
         params = {
-            "q": query,  
-            "type": "opinion",
-            "size": 2,
+            "search": query,  # Correct parameter for CourtListener v4
+            "page_size": 3,   # Limit to 3 results
             "format": "json"
         }
 
@@ -45,9 +48,10 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
 
         logger.info(f"Response Status: {response.status_code}")
-        logger.info(f"Response Text: {response.text[:500]}")  # Log only first 500 chars to avoid flooding logs
 
-        # If response is not 200, return raw response
+        # Check if request was successful
+        if response.status_code == 404:
+            return {"error": "No case law found for this search (404 Not Found)"}
         if response.status_code != 200:
             return {"error": "Failed to fetch case data", "status_code": response.status_code, "response": response.text}
 
@@ -58,8 +62,8 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
             return {"error": "Invalid JSON response", "response": response.text[:500]}
 
         # Ensure results exist
-        if "results" not in data:
-            return {"error": "Unexpected API response format", "raw_response": data}
+        if "results" not in data or not data["results"]:
+            return {"error": "No case law results found", "query": query}
 
         results = []
 
@@ -69,7 +73,7 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
                 "citation": case.get("citation", "N/A"),
                 "court": case.get("court", {}).get("name", "Unknown Court"),
                 "date_decided": case.get("dateFiled", "Unknown"),
-                "summary": case.get("snippet", "No summary available")[:250]
+                "summary": case.get("plain_text", "No summary available")[:250]  # Use plain_text for summary
             })
 
         logger.info(f"Found {len(results)} cases for query: {query}")
