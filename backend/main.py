@@ -25,12 +25,12 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
     try:
         logger.info(f"Searching for case law with query: {query}")
 
-        # API v4 parameters (reduced result size)
+        # API v4 parameters
         params = {
             "q": query,  
-            "type": "opinion",  # Fetch only case opinions
-            "size": 2,  # Limit results to 2 cases (further reducing response size)
-            "format": "json"  # Ensure JSON response
+            "type": "opinion",
+            "size": 2,  # Further reduce result size
+            "format": "json"
         }
 
         headers = {
@@ -41,32 +41,39 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         # Make request to CourtListener API
         response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
 
+        # Log raw response for debugging
+        logger.info(f"Response Status: {response.status_code}")
+
+        # Check if request was successful
         if response.status_code != 200:
             logger.error(f"Failed to fetch data from CourtListener v4: {response.text}")
             raise HTTPException(status_code=500, detail="Failed to fetch case data")
 
-        data = response.json()
+        # Attempt to parse JSON response
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError:
+            logger.error(f"Invalid JSON response received: {response.text[:500]}")
+            raise HTTPException(status_code=500, detail="Received invalid JSON from CourtListener")
 
+        # Ensure results key exists
         if "results" not in data:
-            logger.error(f"Unexpected API response: {data}")
-            raise HTTPException(status_code=500, detail="Invalid API response format")
+            logger.error(f"Unexpected API response format: {data}")
+            raise HTTPException(status_code=500, detail="Unexpected API response format")
 
         results = []
 
-        # Extract only necessary case details
+        # Extract and format necessary data
         for case in data["results"]:
-            case_info = {
+            results.append({
                 "case_name": case.get("caseName", "Unknown"),
                 "citation": case.get("citation", "N/A"),
                 "court": case.get("court", {}).get("name", "Unknown Court"),
                 "date_decided": case.get("dateFiled", "Unknown"),
-                "summary": case.get("snippet", "No summary available")[:250]  # Shorter summary
-            }
-            results.append(case_info)
+                "summary": case.get("snippet", "No summary available")[:250]  # Shortened snippet
+            })
 
         logger.info(f"Found {len(results)} cases for query: {query}")
-
-        # Return JSON response properly (not as a dumped string)
         return {"query": query, "cases": results}
 
     except requests.exceptions.RequestException as e:
