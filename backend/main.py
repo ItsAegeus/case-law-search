@@ -84,3 +84,7 @@ async def search_case_law(query: str):
         results.append(case_data)
 
     return JSONResponse(content={"message": f"{len(results)} case(s) found for query: {query}", "results": results})
+    
+    if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
