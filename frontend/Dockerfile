@@ -1,23 +1,21 @@
-# Use an official Node.js image with Alpine (lightweight)
+# Use Node.js base image
 FROM node:18-alpine
 
-# Set the working directory inside the container
+# Set working directory inside the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json first (for caching dependencies)
-COPY package*.json ./
-
-# Install dependencies
+# Copy package.json and install dependencies
+COPY frontend/package*.json ./
 RUN npm install
 
-# Copy all project files
-COPY . .
+# Copy the rest of the app
+COPY frontend ./
 
 # Build the React app
 RUN npm run build
 
-# Expose the port (default for static sites)
+# Expose the frontend port (React uses 3000)
 EXPOSE 3000
 
-# Serve the built app using a simple static server
+# Serve the frontend using a static server
 CMD ["npx", "serve", "-s", "build", "-l", "3000"]
