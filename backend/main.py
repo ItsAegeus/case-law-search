@@ -26,22 +26,26 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         # Make a request to CourtListener API
         response = requests.get(COURTLISTENER_API, params={"q": query, "page_size": 5})
 
+        # Log the full response (for debugging)
+        logger.info(f"Response Status: {response.status_code}")
+        logger.info(f"Response Text: {response.text}")
+
         # Check if the request was successful
         if response.status_code != 200:
             logger.error(f"Failed to fetch data from CourtListener: {response.text}")
-            raise HTTPException(status_code=500, detail="Failed to fetch data from CourtListener")
+            raise HTTPException(status_code=500, detail=f"Failed to fetch data: {response.text}")
 
         data = response.json()
         results = []
 
-        # Extract case details from the API response
+        # Extract case details
         for case in data.get("results", []):
             results.append({
                 "case_name": case.get("caseName", "Unknown"),
                 "citation": case.get("citation", "N/A"),
                 "court": case.get("court", {}).get("name", "Unknown Court"),
                 "date_decided": case.get("dateFiled", "Unknown"),
-                "summary": case.get("plain_text", "No summary available")[:500]  # Limit summary length
+                "summary": case.get("plain_text", "No summary available")[:500]
             })
 
         logger.info(f"Found {len(results)} cases for query: {query}")
@@ -50,7 +54,6 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
     except Exception as e:
         logger.error(f"Error during case search: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
 # Run the server (For Local Development)
 if __name__ == "__main__":
     import uvicorn
