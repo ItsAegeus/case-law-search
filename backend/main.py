@@ -1,6 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 import requests
 import logging
 import uvicorn
@@ -88,3 +91,11 @@ def search_case_law(query: str):
 # ✅ Ensure FastAPI runs on Railway-compatible settings
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    
+    # Serve the frontend (HTML) file
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def serve_homepage():
+    """Serve the search page."""
+    return FileResponse("static/index.html")
