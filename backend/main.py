@@ -32,8 +32,8 @@ def home():
 def search_case_law(query: str):
     """Search for case law based on user input."""
     
-    if not query.strip():
-        raise HTTPException(status_code=400, detail="Error: A query parameter is required.")
+    if not query:
+        raise HTTPException(status_code=400, detail="Query parameter is required.")
 
     logging.info(f"🔍 Searching case law for: {query}")
 
@@ -49,10 +49,17 @@ def search_case_law(query: str):
         cases = []
 
         for result in data.get("results", []):
+            # ✅ Fix: Ensure 'court' is a dictionary before calling .get()
+            court_info = result.get("court", "Unknown Court")
+            if not isinstance(court_info, dict):  
+                court_name = "Unknown Court"
+            else:
+                court_name = court_info.get("name", "Unknown Court")
+
             cases.append({
                 "📌 Case Name": result.get("caseName", "Unknown"),
                 "📜 Citation": result.get("citation", "No citation available"),
-                "⚖️ Court": result.get("court", {}).get("name", "Unknown Court"),
+                "⚖️ Court": court_name,  # ✅ Fixed here
                 "📅 Date Decided": result.get("dateFiled", "Unknown Date"),
                 "📄 Summary": result.get("snippet", "No summary available"),
                 "🔗 Full Case": f"https://www.courtlistener.com/opinion/{result.get('id')}/"
@@ -74,7 +81,6 @@ def search_case_law(query: str):
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Failed to fetch case law data: {str(e)}")
         raise HTTPException(status_code=500, detail="❌ Error: Could not fetch case law data.")
-
 # ✅ Ensure FastAPI runs on Railway-compatible settings
 import uvicorn
 
