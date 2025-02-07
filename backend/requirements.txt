@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-psycopg2-binary
-pinecone-client
-openai
-python-dotenv
 requests
+sqlalchemy
+psycopg2-binary  # For PostgreSQL support
+python-dotenv  # If using .env files for secrets (optional)
