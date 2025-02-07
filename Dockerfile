@@ -1,21 +1,21 @@
-# Use Node.js base image
+# Use a Node.js base image
 FROM node:18-alpine
 
-# Set working directory inside the container
+# Set working directory
 WORKDIR /app
 
 # Copy package.json and install dependencies
-COPY frontend/package*.json ./
+COPY package.json ./
 RUN npm install
 
-# Copy the rest of the app
-COPY frontend ./
+# Copy all React frontend files (adjust if needed)
+COPY . ./
 
 # Build the React app
 RUN npm run build
 
-# Expose the frontend port (React uses 3000)
+# Expose the frontend port
 EXPOSE 3000
 
-# Serve the frontend using a static server
+# Serve the built React app
 CMD ["npx", "serve", "-s", "build", "-l", "3000"]
