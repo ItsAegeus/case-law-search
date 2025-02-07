@@ -6,6 +6,7 @@ import requests
 import logging
 import json
 import os
+import uvicorn
 
 # Initialize FastAPI app
 app = FastAPI()
