@@ -49,7 +49,7 @@
                 return;
             }
 
-            fetch(`https://case-law-search-production.up.railway.app/search?query=${query}`)
+            fetch(`/search?query=${encodeURIComponent(query)}`)
                 .then(response => response.json())
                 .then(data => {
                     const resultsDiv = document.getElementById("results");
@@ -64,12 +64,15 @@
                         const caseDiv = document.createElement("div");
                         caseDiv.className = "case";
                         caseDiv.innerHTML = `
-                            <h3>${caseLaw["📌 Case Name"]}</h3>
-                            <p><strong>📜 Citation:</strong> ${caseLaw["📜 Citation"]}</p>
-                            <p><strong>⚖️ Court:</strong> ${caseLaw["⚖️ Court"]}</p>
-                            <p><strong>📅 Date Decided:</strong> ${caseLaw["📅 Date Decided"]}</p>
-                            <p><strong>📄 Summary:</strong> ${caseLaw["📄 Summary"]}</p>
-                            <p><a href="${caseLaw["🔗 Full Case"]}" target="_blank">🔗 Read Full Case</a></p>
+                            <h3>${caseLaw["Case Name"] || "Unknown Case"}</h3>
+                            <p><strong>📜 Citation:</strong> ${caseLaw["Citation"] || "No Citation Available"}</p>
+                            <p><strong>⚖️ Court:</strong> ${caseLaw["Court"] || "Unknown Court"}</p>
+                            <p><strong>📅 Date Decided:</strong> ${caseLaw["Date Decided"] || "No Date Available"}</p>
+                            <p><strong>📄 Summary:</strong> ${caseLaw["Summary"] || "No Summary Available"}</p>
+                            <p><strong>🤖 AI Summary:</strong> ${caseLaw["AI Summary"] || "AI Summary Not Available"}</p>
+                            <p><a href="${caseLaw["Full Case"] || "#"}" target="_blank">
+                                ${caseLaw["Full Case"] ? "🔗 Read Full Case" : "No Link Available"}
+                            </a></p>
                         `;
                         resultsDiv.appendChild(caseDiv);
                     });
