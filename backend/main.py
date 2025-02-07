@@ -12,9 +12,8 @@ app = FastAPI()
 
 # Environment Variables
 PORT = int(os.getenv("PORT", 8000))
-
-# CourtListener API v4 (Publicly Accessible)
 COURTLISTENER_API_V4 = "https://www.courtlistener.com/api/v4/search/"
+API_KEY = os.getenv("COURTLISTENER_API_KEY")  # Read API key from Railway environment variables
 
 @app.get("/")
 def home():
@@ -29,7 +28,7 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         params = {
             "q": query,  
             "type": "opinion",
-            "size": 2,  # Further reduce result size
+            "size": 2,
             "format": "json"
         }
 
@@ -38,39 +37,32 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
             "Accept": "application/json"
         }
 
+        # Add API key if available
+        if API_KEY:
+            headers["Authorization"] = f"Token {API_KEY}"
+
         # Make request to CourtListener API
         response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
 
-        # Log raw response for debugging
-        logger.info(f"Response Status: {response.status_code}")
-
-        # Check if request was successful
         if response.status_code != 200:
             logger.error(f"Failed to fetch data from CourtListener v4: {response.text}")
             raise HTTPException(status_code=500, detail="Failed to fetch case data")
 
-        # Attempt to parse JSON response
-        try:
-            data = response.json()
-        except requests.exceptions.JSONDecodeError:
-            logger.error(f"Invalid JSON response received: {response.text[:500]}")
-            raise HTTPException(status_code=500, detail="Received invalid JSON from CourtListener")
+        data = response.json()
 
-        # Ensure results key exists
         if "results" not in data:
             logger.error(f"Unexpected API response format: {data}")
             raise HTTPException(status_code=500, detail="Unexpected API response format")
 
         results = []
 
-        # Extract and format necessary data
         for case in data["results"]:
             results.append({
                 "case_name": case.get("caseName", "Unknown"),
                 "citation": case.get("citation", "N/A"),
                 "court": case.get("court", {}).get("name", "Unknown Court"),
                 "date_decided": case.get("dateFiled", "Unknown"),
-                "summary": case.get("snippet", "No summary available")[:250]  # Shortened snippet
+                "summary": case.get("snippet", "No summary available")[:250]
             })
 
         logger.info(f"Found {len(results)} cases for query: {query}")
