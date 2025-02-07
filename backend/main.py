@@ -1,12 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import os
 import requests
 import logging
-import uvicorn
+import json
+import os
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -26,15 +25,20 @@ logging.basicConfig(level=logging.INFO)
 # CourtListener API URL
 COURTLISTENER_API_URL = "https://www.courtlistener.com/api/rest/v4/search/"
 
-@app.get("/")
-def home():
-    """Welcome message with usage instructions."""
-    return JSONResponse(content={
-        "message": "Welcome to the Case Law Search API!",
-        "instructions": "Use /search?query=your_search_term to search case law."
-    })
+# ✅ Serve static files for frontend (Search page)
+if not os.path.exists("static"):
+    os.makedirs("static")
 
-import json  # Import the json module
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def serve_homepage():
+    """Serve the search bar page."""
+    index_path = "static/index.html"
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    else:
+        return JSONResponse(content={"error": "index.html not found. Please ensure it is in the 'static' folder."}, status_code=404)
 
 @app.get("/search")
 def search_case_law(query: str):
@@ -91,11 +95,3 @@ def search_case_law(query: str):
 # ✅ Ensure FastAPI runs on Railway-compatible settings
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
-    
-    # Serve the frontend (HTML) file
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/")
-def serve_homepage():
-    """Serve the search page."""
-    return FileResponse("static/index.html")
