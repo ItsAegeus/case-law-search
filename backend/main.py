@@ -124,7 +124,9 @@ def generate_ai_summary(case_summary: str) -> str:
         return "AI Analysis not available (missing API key)."
 
     try:
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ Use the new API format
+
+        response = client.chat.completions.create(  # ✅ New syntax
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You are a legal AI assistant that summarizes and explains case law."},
@@ -134,13 +136,12 @@ def generate_ai_summary(case_summary: str) -> str:
             max_tokens=150
         )
 
-        ai_summary = response["choices"][0]["message"]["content"]
-        return ai_summary.strip()
+        return response.choices[0].message.content.strip()
 
     except Exception as e:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
-
+        
 # ✅ Ensure FastAPI runs on Railway-compatible settings
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
