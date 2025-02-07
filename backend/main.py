@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query, HTTPException
 import requests
 import os
 import logging
+import time  # Import time module for delay
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,7 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
 
         # API v4 parameters (use "search" instead of "q")
         params = {
-            "search": query,  # Correct parameter for CourtListener v4
+            "search": query,  
             "page_size": 3,   # Limit to 3 results
             "format": "json"
         }
@@ -44,16 +45,18 @@ def search_cases(query: str = Query(..., description="Enter legal keywords or ca
         if API_KEY:
             headers["Authorization"] = f"Token {API_KEY}"
 
-        # Make request to CourtListener API
-        response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
+        # Try up to 3 times if the response is 202
+        for attempt in range(3):
+            response = requests.get(COURTLISTENER_API_V4, params=params, headers=headers)
+            logger.info(f"Response Status: {response.status_code}")
 
-        logger.info(f"Response Status: {response.status_code}")
-
-        # Check if request was successful
-        if response.status_code == 404:
-            return {"error": "No case law found for this search (404 Not Found)"}
-        if response.status_code != 200:
-            return {"error": "Failed to fetch case data", "status_code": response.status_code, "response": response.text}
+            if response.status_code == 200:
+                break  # Successful request, proceed
+            elif response.status_code == 202:
+                logger.info(f"Request still processing (202). Waiting before retrying...")
+                time.sleep(2)  # Wait 2 seconds before retrying
+            else:
+                return {"error": "Failed to fetch case data", "status_code": response.status_code, "response": response.text}
 
         # Ensure response is JSON
         try:
