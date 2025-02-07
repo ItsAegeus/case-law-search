@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import requests
 import logging
+import uvicorn
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -9,7 +11,7 @@ app = FastAPI()
 # Enable CORS for frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with frontend URL for security
+    allow_origins=["*"],  # Replace "*" with frontend URL for better security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,17 +25,18 @@ COURTLISTENER_API_URL = "https://www.courtlistener.com/api/rest/v4/search/"
 
 @app.get("/")
 def home():
-    return {
+    """Welcome message with usage instructions."""
+    return JSONResponse(content={
         "message": "Welcome to the Case Law Search API!",
         "instructions": "Use /search?query=your_search_term to search case law."
-    }
+    }, status_code=200, media_type="application/json", indent=4)
 
 @app.get("/search")
 def search_case_law(query: str):
     """Search for case law based on user input."""
     
-    if not query:
-        raise HTTPException(status_code=400, detail="Query parameter is required.")
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Error: A query parameter is required.")
 
     logging.info(f"🔍 Searching case law for: {query}")
 
@@ -59,30 +62,29 @@ def search_case_law(query: str):
             cases.append({
                 "📌 Case Name": result.get("caseName", "Unknown"),
                 "📜 Citation": result.get("citation", "No citation available"),
-                "⚖️ Court": court_name,  # ✅ Fixed here
+                "⚖️ Court": court_name,
                 "📅 Date Decided": result.get("dateFiled", "Unknown Date"),
                 "📄 Summary": result.get("snippet", "No summary available"),
                 "🔗 Full Case": f"https://www.courtlistener.com/opinion/{result.get('id')}/"
             })
 
         if not cases:
-            return {
+            return JSONResponse(content={
                 "message": "No cases found for this query.",
                 "query": query,
                 "cases": []
-            }
+            }, status_code=200, media_type="application/json", indent=4)
 
-        return {
+        return JSONResponse(content={
             "message": f"✅ {len(cases)} case(s) found for query: '{query}'.",
             "query": query,
             "results": cases
-        }
+        }, status_code=200, media_type="application/json", indent=4)
 
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Failed to fetch case law data: {str(e)}")
         raise HTTPException(status_code=500, detail="❌ Error: Could not fetch case law data.")
-# ✅ Ensure FastAPI runs on Railway-compatible settings
-import uvicorn
 
+# ✅ Ensure FastAPI runs on Railway-compatible settings
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
