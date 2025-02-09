@@ -5,6 +5,28 @@ import requests
 import os
 import openai
 import logging
+import aioredis
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+
+async def fetch_case_law(query: str):
+    """Check cache before hitting CourtListener API."""
+    cache_key = f"case_law:{query}"
+    cached_data = await redis.get(cache_key)
+    
+    if cached_data:
+        return json.loads(cached_data)
+
+    # If not in cache, fetch from CourtListener
+    url = f"https://www.courtlistener.com/api/rest/v4/search/?q={query}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        case_data = response.json()
+        await redis.set(cache_key, json.dumps(case_data), ex=3600)  # Cache for 1 hour
+        return case_data
+    
+    return {"error": "Failed to fetch case law data"}
 
 # Load API keys from environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
