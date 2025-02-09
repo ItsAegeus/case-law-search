@@ -79,7 +79,9 @@ def generate_ai_summary(case_summary: str) -> str:
     logging.info("❌ Cache MISS for AI Summary. Generating with OpenAI...")
 
     try:
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ Correct new API usage
+
+        response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are a legal AI assistant that summarizes case law."},
@@ -89,7 +91,7 @@ def generate_ai_summary(case_summary: str) -> str:
             max_tokens=300
         )
 
-        summary = response["choices"][0]["message"]["content"].strip()
+        summary = response.choices[0].message.content.strip()
 
         # Store AI summary in Redis for 24 hours
         redis_client.setex(cache_key, 86400, summary)
