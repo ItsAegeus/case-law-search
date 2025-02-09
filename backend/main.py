@@ -69,10 +69,10 @@ def fetch_case_law(query: str):
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI case summaries (cached)
-def generate_ai_summary(case_summary: str) -> str:
-    """Uses OpenAI GPT to summarize case law, with Redis caching."""
-
+# Function to generate AI case summaries with retry mechanism
+def generate_ai_summary(case_summary: str, retry_count=0) -> str:
+    """Generates AI summaries with retries if OpenAI returns an empty response."""
+    
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
@@ -88,7 +88,7 @@ def generate_ai_summary(case_summary: str) -> str:
         logging.info("✅ Cache HIT for AI Summary")
         return cached_summary
 
-    logging.info("❌ Cache MISS for AI Summary. Generating with OpenAI...")
+    logging.info(f"❌ Cache MISS for AI Summary. Attempt {retry_count + 1}")
 
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -105,20 +105,26 @@ def generate_ai_summary(case_summary: str) -> str:
 
         summary = response.choices[0].message.content.strip()
 
-        if not summary:
-            logging.warning("⚠️ OpenAI returned an empty summary.")
+        if not summary and retry_count < 2:  # Retry up to 2 times if summary is empty
+            logging.warning(f"⚠️ OpenAI returned empty summary. Retrying (Attempt {retry_count + 2})...")
+            return generate_ai_summary(case_summary, retry_count + 1)
+
+        if not summary:  # If still empty after retries, return fallback message
+            logging.error("❌ OpenAI failed to generate a summary after retries.")
             return "AI Summary Not Available"
 
-        redis_client.setex(cache_key, 86400, summary)
+        redis_client.setex(cache_key, 86400, summary)  # Cache summary for 24 hours
         return summary
+
     except Exception as e:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
+
 # Case law search endpoint (with filtering & sorting)
 @app.get("/search")
-@limiter.limit("10/minute")  # Max 10 searches per minute per user
+@limiter.limit("10/minute")
 async def search_case_law(request: Request, query: str, court: str = None, sort: str = "relevance"):
-    """Handles search requests with filtering and sorting."""
+    """Handles search requests with filtering, sorting, and AI summaries."""
     raw_data = fetch_case_law(query)
 
     if "error" in raw_data:
@@ -126,17 +132,17 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
 
     results = raw_data.get("results", [])
 
-    # 🔹 Apply Court Filtering
+    # Apply Court Filtering
     if court:
         results = [case for case in results if case.get("court", "").lower() == court.lower()]
 
-    # 🔹 Apply Sorting
+    # Apply Sorting
     if sort == "date_desc":
         results.sort(key=lambda x: x.get("dateFiled", "0000-00-00"), reverse=True)
     elif sort == "date_asc":
         results.sort(key=lambda x: x.get("dateFiled", "9999-99-99"))
 
-    # 🔹 Ensure Correct Field Mapping
+    # Ensure Correct Field Mapping & AI Summary Generation
     formatted_results = []
     for case in results:
         formatted_results.append({
