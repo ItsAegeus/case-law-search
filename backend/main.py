@@ -163,21 +163,28 @@ async def search_case_law(request: Request, query: str):
         logging.info(f"📜 First Case Data: {json.dumps(results[0], indent=2)}")
 
     formatted_results = []
-    for case in results:
-        try:
-            citation = case.get("citation", [])
-            formatted_results.append({
-                "Case Name": case.get("caseName") or "Unknown Case",
-                "Citation": citation[0] if isinstance(citation, list) and citation else "No Citation Available",
-                "Court": case.get("court", {}).get("name", "Unknown Court"),
-                "Date Decided": case.get("dateFiled") or "No Date Available",
-                "Summary": case.get("summary") or "No Summary Available",
-                "AI Summary": generate_ai_summary(case),
-                "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
-            })
-        except Exception as e:
-            logging.error(f"❌ Error Processing Case: {str(e)}")
+for case in results:
+    try:
+        logging.info(f"🧐 Processing Case Data: {case}")  # <-- NEW DEBUG LOG
 
+        # Ensure 'case' is a dictionary
+        if not isinstance(case, dict):
+            logging.error(f"❌ Expected dict but got {type(case)}: {case}")
+            continue  # Skip this bad entry
+
+        citation = case.get("citation", [])
+        formatted_results.append({
+            "Case Name": case.get("caseName", "Unknown Case"),
+            "Citation": citation[0] if isinstance(citation, list) and citation else "No Citation Available",
+            "Court": case.get("court", {}).get("name", "Unknown Court"),
+            "Date Decided": case.get("dateFiled", "No Date Available"),
+            "Summary": case.get("summary", "No Summary Available"),
+            "AI Summary": generate_ai_summary(case),
+            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
+        })
+
+    except Exception as e:
+        logging.error(f"❌ Error Processing Case: {str(e)}")
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
 
 # Start FastAPI with Uvicorn
