@@ -5,9 +5,11 @@ import redis
 import requests
 import openai
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,6 +30,11 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 # Initialize FastAPI app
 app = FastAPI()
+
+# Set up rate limiting (max 10 searches per minute per user)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
 
 # Mount the static folder for frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -88,7 +95,7 @@ def generate_ai_summary(case_summary: str) -> str:
                 {"role": "user", "content": f"Summarize this legal case:\n\n{case_summary}"}
             ],
             temperature=0.7,
-            max_tokens=300
+            max_tokens=500  # Increased from 300 to 500
         )
 
         summary = response.choices[0].message.content.strip()
@@ -100,9 +107,10 @@ def generate_ai_summary(case_summary: str) -> str:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# Case law search endpoint
+# Case law search endpoint (with rate limiting)
 @app.get("/search")
-async def search_case_law(query: str):
+@limiter.limit("10/minute")  # Max 10 searches per minute per user
+async def search_case_law(request: Request, query: str):
     """Handles search requests and returns case law data."""
     raw_data = fetch_case_law(query)
 
