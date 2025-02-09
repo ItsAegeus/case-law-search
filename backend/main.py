@@ -71,9 +71,9 @@ def fetch_case_law(query: str):
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI summaries using CourtListener API full case text
+# Function to generate AI summaries using full case text from CourtListener API
 def generate_ai_summary(case):
-    """Generates AI summaries using full case text from CourtListener API."""
+    """Generates AI summaries by correctly extracting full case text from CourtListener API."""
     
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
@@ -83,7 +83,7 @@ def generate_ai_summary(case):
 
     # 🔹 If no summary, fetch full case text via API
     if not case_summary:
-        opinion_id = case.get("id")  # Get the case ID from API response
+        opinion_id = case.get("id")
         if opinion_id:
             api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
             logging.info(f"📥 Fetching full case text from API: {api_url}")
@@ -91,11 +91,12 @@ def generate_ai_summary(case):
                 response = requests.get(api_url)
                 response.raise_for_status()
                 opinion_data = response.json()
-                
-                case_summary = opinion_data.get("plain_text", "")[:2000]  # Use first 2000 characters
 
-                if not case_summary.strip():
-                    logging.warning("⚠️ Full case text is empty from API.")
+                # ✅ Extract the full case text correctly
+                case_summary = opinion_data.get("plain_text", "").strip()
+
+                if not case_summary:
+                    logging.warning("⚠️ API returned empty plain_text field.")
                     return "AI Summary Not Available (No case text found)."
 
             except requests.exceptions.RequestException as e:
@@ -165,8 +166,7 @@ async def search_case_law(request: Request, query: str):
             "Date Decided": case.get("dateFiled") or "No Date Available",
             "Summary": case.get("summary") or "No Summary Available",
             "AI Summary": generate_ai_summary(case),
-            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}",
-            "id": case.get("id")  # 🔹 Include case ID for API fetching
+            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
         })
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
