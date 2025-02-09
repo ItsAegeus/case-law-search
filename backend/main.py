@@ -9,9 +9,19 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
 # Load environment variables
 REDIS_URL = os.getenv("REDIS_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Ensure Redis and OpenAI API key are set
+if not REDIS_URL:
+    raise ValueError("❌ REDIS_URL is missing! Set it in Railway environment variables.")
+
+if not OPENAI_API_KEY:
+    logging.error("❌ Missing OPENAI_API_KEY! AI summaries will not work.")
 
 # Initialize Redis client
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
@@ -27,7 +37,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_frontend():
     return FileResponse("static/index.html")
 
-# Function to fetch case law from CourtListener API (with caching)
+# Function to fetch case law from CourtListener API (with Redis caching)
 def fetch_case_law(query: str):
     """Fetches case law data from CourtListener API with Redis caching."""
     cache_key = f"case_law:{query}"
@@ -55,6 +65,7 @@ def fetch_case_law(query: str):
 # Function to generate AI case summaries (cached)
 def generate_ai_summary(case_summary: str) -> str:
     """Uses OpenAI GPT to summarize case law, with Redis caching."""
+
     if not OPENAI_API_KEY:
         return "AI Analysis not available (missing API key)."
 
@@ -68,19 +79,17 @@ def generate_ai_summary(case_summary: str) -> str:
     logging.info("❌ Cache MISS for AI Summary. Generating with OpenAI...")
 
     try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are a legal AI assistant that summarizes case law."},
-                {"role": "user", "content": f"Summarize this case: {case_summary}"}
+                {"role": "user", "content": f"Summarize this legal case:\n\n{case_summary}"}
             ],
             temperature=0.7,
-            max_tokens=200
+            max_tokens=300
         )
 
-        summary = response.choices[0].message.content.strip()
+        summary = response["choices"][0]["message"]["content"].strip()
 
         # Store AI summary in Redis for 24 hours
         redis_client.setex(cache_key, 86400, summary)
