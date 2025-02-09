@@ -23,10 +23,16 @@ if not REDIS_URL:
     raise ValueError("❌ REDIS_URL is missing! Set it in Railway environment variables.")
 
 if not OPENAI_API_KEY:
-    logging.error("❌ Missing OPENAI_API_KEY! AI summaries will not work.")
+    logging.warning("⚠️ Missing OPENAI_API_KEY! AI summaries will not work.")
 
 # Initialize Redis client
-redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+try:
+    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client.ping()  # Test Redis connection
+    logging.info("✅ Connected to Redis!")
+except redis.exceptions.ConnectionError:
+    logging.error("❌ Could not connect to Redis. Check REDIS_URL.")
+    redis_client = None  # Prevents crashes if Redis isn't working
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -48,11 +54,13 @@ async def serve_frontend():
 def fetch_case_law(query: str):
     """Fetches case law data from CourtListener API with Redis caching and logs data."""
     cache_key = f"case_law:{query}"
-    cached_data = redis_client.get(cache_key)
-
-    if cached_data:
-        logging.info(f"✅ Cache HIT for: {query}")
-        return json.loads(cached_data)
+    
+    # Check Redis cache
+    if redis_client:
+        cached_data = redis_client.get(cache_key)
+        if cached_data:
+            logging.info(f"✅ Cache HIT for: {query}")
+            return json.loads(cached_data)
 
     logging.info(f"❌ Cache MISS for: {query}. Fetching from API...")
 
@@ -62,10 +70,13 @@ def fetch_case_law(query: str):
         response.raise_for_status()
         data = response.json()
 
-        if data.get("results"):
+        if "results" in data and data["results"]:
             logging.info(f"📜 First Case Data: {json.dumps(data['results'][0], indent=2)}")
 
-        redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
+        # Store in Redis cache (if available)
+        if redis_client:
+            redis_client.setex(cache_key, 600, json.dumps(data))
+
         return data
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ API Error: {str(e)}")
@@ -73,7 +84,7 @@ def fetch_case_law(query: str):
 
 # Function to generate AI summaries using full case text from CourtListener API
 def generate_ai_summary(case):
-    """Generates AI summaries by correctly extracting full case text from CourtListener API."""
+    """Generates AI summaries by extracting full case text from CourtListener API."""
 
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
@@ -85,10 +96,7 @@ def generate_ai_summary(case):
 
     case_summary = case.get("summary", "").strip()
 
-    # 🔹 Log case structure before using it
-    logging.info(f"🔍 AI Summary Function Received Case Data: {json.dumps(case, indent=2)}")
-
-    # ✅ Try extracting `id` from opinions if missing
+    # Try extracting `id` from opinions if missing
     opinion_id = case.get("id")
 
     if not opinion_id and "opinions" in case:
@@ -96,18 +104,18 @@ def generate_ai_summary(case):
         if isinstance(opinions, list) and opinions:
             opinion_id = opinions[0].get("id")  # Get the first opinion ID if available
 
-    # 🚨 If still no `id`, fallback to `cluster_id`
+    # Fallback to `cluster_id`
     if not opinion_id:
         cluster_id = case.get("cluster_id")
         if cluster_id:
-            logging.warning(f"⚠️ No opinion ID found. Fetching case text using cluster_id: {cluster_id}")
-            opinion_id = cluster_id  # Use cluster_id as a fallback
+            logging.warning(f"⚠️ No opinion ID found. Using cluster_id: {cluster_id}")
+            opinion_id = cluster_id
 
     if not opinion_id:
-        logging.error("⚠️ AI Summary Skipped: No valid opinion ID found in case or opinions list.")
+        logging.error("⚠️ AI Summary Skipped: No valid opinion ID found.")
         return "AI Summary Not Available (No opinion ID)."
 
-    # 🔹 Fetch full case text from API
+    # Fetch full case text from API
     api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
     logging.info(f"📥 Fetching full case text from API: {api_url}")
 
@@ -129,9 +137,6 @@ def generate_ai_summary(case):
     if not case_summary.strip():
         logging.warning("⚠️ No usable case summary or text found.")
         return "AI Summary Not Available."
-
-    # 🔹 Log what is actually being sent to OpenAI
-    logging.info(f"✅ Case Text Extracted (First 500 chars): {case_summary[:500]}...")
 
     cache_key = f"ai_summary:{hash(case_summary)}"
     cached_summary = redis_client.get(cache_key)
@@ -168,9 +173,8 @@ def generate_ai_summary(case):
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# Case law search endpoint (with AI summaries using full case text)
+# FastAPI search endpoint
 @app.get("/search")
-@limiter.limit("10/minute")
 async def search_case_law(request: Request, query: str):
     """Handles search requests with AI summaries using full case text if needed."""
     raw_data = fetch_case_law(query)
@@ -184,21 +188,11 @@ async def search_case_law(request: Request, query: str):
     formatted_results = []
     for index, case in enumerate(results):
         try:
-            logging.info(f"🧐 Processing Case [{index}] Type: {type(case)}")  
-
-            if not isinstance(case, dict):
-                logging.error(f"❌ Case [{index}] is an unexpected type ({type(case)}): {case}")
-                continue  
-
             citation = case.get("citation", [])
             formatted_results.append({
                 "Case Name": case.get("caseName", "Unknown Case"),
                 "Citation": citation[0] if isinstance(citation, list) and citation else "No Citation Available",
-                "Court": case.get("court", "Unknown Court"),
-                "Date Decided": case.get("dateFiled", "No Date Available"),
-                "Summary": case.get("summary", "No Summary Available"),
                 "AI Summary": generate_ai_summary(case),
-                "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
             })
 
         except Exception as e:
