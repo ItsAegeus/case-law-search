@@ -74,7 +74,12 @@ def generate_ai_summary(case_summary: str) -> str:
     """Uses OpenAI GPT to summarize case law, with Redis caching."""
 
     if not OPENAI_API_KEY:
+        logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
+
+    if not case_summary.strip():
+        logging.warning("⚠️ Empty case summary received. Skipping AI generation.")
+        return "AI Summary Not Available"
 
     cache_key = f"ai_summary:{hash(case_summary)}"
     cached_summary = redis_client.get(cache_key)
@@ -86,7 +91,7 @@ def generate_ai_summary(case_summary: str) -> str:
     logging.info("❌ Cache MISS for AI Summary. Generating with OpenAI...")
 
     try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # ✅ Correct new API usage
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
@@ -95,18 +100,20 @@ def generate_ai_summary(case_summary: str) -> str:
                 {"role": "user", "content": f"Summarize this legal case:\n\n{case_summary}"}
             ],
             temperature=0.7,
-            max_tokens=500  # Increased from 300 to 500
+            max_tokens=500
         )
 
         summary = response.choices[0].message.content.strip()
 
-        # Store AI summary in Redis for 24 hours
+        if not summary:
+            logging.warning("⚠️ OpenAI returned an empty summary.")
+            return "AI Summary Not Available"
+
         redis_client.setex(cache_key, 86400, summary)
         return summary
     except Exception as e:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
-
 # Case law search endpoint (with filtering & sorting)
 @app.get("/search")
 @limiter.limit("10/minute")  # Max 10 searches per minute per user
