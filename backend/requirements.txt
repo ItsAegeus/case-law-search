@@ -4,3 +4,4 @@ redis
 requests
 openai
 slowapi
+beautifulsoup4
