@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
+from bs4 import BeautifulSoup  # Import BeautifulSoup for case text extraction
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,7 +74,7 @@ def fetch_case_law(query: str):
 
 # Function to generate AI summaries using full case text if summary is missing
 def generate_ai_summary(case):
-    """Generates AI summaries using full case text if summary is missing and logs data sent to OpenAI."""
+    """Generates AI summaries using full case text if summary is missing."""
     
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
@@ -81,15 +82,25 @@ def generate_ai_summary(case):
 
     case_summary = case.get("summary", "").strip()
 
-    # 🔹 If no summary, try fetching the full case text
+    # 🔹 If no summary, try scraping the full case text
     if not case_summary:
-        full_case_url = case.get("full_case")
-        if full_case_url and "courtlistener.com" in full_case_url:
+        full_case_url = case.get("absolute_url")
+        if full_case_url:
+            full_case_url = f"https://www.courtlistener.com{full_case_url}"
             logging.info(f"📥 Fetching full case text from: {full_case_url}")
             try:
                 response = requests.get(full_case_url)
                 response.raise_for_status()
-                case_summary = response.text[:2000]  # Limit to first 2000 chars
+
+                # Extract case text using BeautifulSoup
+                soup = BeautifulSoup(response.text, "html.parser")
+                paragraphs = soup.find_all("p")
+                case_summary = "\n".join([p.get_text() for p in paragraphs])[:2000]  # Limit to 2000 chars
+
+                if not case_summary.strip():
+                    logging.warning("⚠️ Full case text is empty after scraping.")
+                    return "AI Summary Not Available (No case text found)."
+
             except requests.exceptions.RequestException as e:
                 logging.error(f"❌ Failed to fetch full case text: {str(e)}")
                 return "AI Summary Not Available (Failed to fetch full case text)."
@@ -98,7 +109,7 @@ def generate_ai_summary(case):
         logging.warning("⚠️ No usable case summary or text found.")
         return "AI Summary Not Available."
 
-    # 🔹 Log the exact text being sent to OpenAI
+    # 🔹 Log what is being sent to OpenAI
     logging.info(f"📜 Sending to OpenAI: {case_summary[:500]}... [Truncated]")
 
     cache_key = f"ai_summary:{hash(case_summary)}"
@@ -157,7 +168,7 @@ async def search_case_law(request: Request, query: str):
             "Date Decided": case.get("dateFiled") or "No Date Available",
             "Summary": case.get("summary") or "No Summary Available",
             "AI Summary": generate_ai_summary(case),
-            "Full Case": case.get("absolute_url") or "#"
+            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
         })
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
