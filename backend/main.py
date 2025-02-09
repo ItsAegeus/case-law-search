@@ -44,9 +44,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_frontend():
     return FileResponse("static/index.html")
 
-# Function to fetch case law from CourtListener API (with Redis caching)
+# Function to fetch case law from CourtListener API (logs response)
 def fetch_case_law(query: str):
-    """Fetches case law data from CourtListener API with Redis caching."""
+    """Fetches case law data from CourtListener API with Redis caching and logs data."""
     cache_key = f"case_law:{query}"
     cached_data = redis_client.get(cache_key)
 
@@ -62,6 +62,9 @@ def fetch_case_law(query: str):
         response.raise_for_status()
         data = response.json()
 
+        # 🔹 Log CourtListener's response for debugging
+        logging.info(f"📜 CourtListener Response: {json.dumps(data, indent=2)[:1000]}... [Truncated]")
+
         redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
         return data
     except requests.exceptions.RequestException as e:
@@ -70,15 +73,15 @@ def fetch_case_law(query: str):
 
 # Function to generate AI summaries using full case text if summary is missing
 def generate_ai_summary(case):
-    """Generates AI summaries using full case text if summary is missing."""
+    """Generates AI summaries using full case text if summary is missing and logs data sent to OpenAI."""
     
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
 
-    # Use the full case text if summary is missing
     case_summary = case.get("summary", "").strip()
-    
+
+    # 🔹 If no summary, try fetching the full case text
     if not case_summary:
         full_case_url = case.get("full_case")
         if full_case_url and "courtlistener.com" in full_case_url:
@@ -95,6 +98,9 @@ def generate_ai_summary(case):
         logging.warning("⚠️ No usable case summary or text found.")
         return "AI Summary Not Available."
 
+    # 🔹 Log the exact text being sent to OpenAI
+    logging.info(f"📜 Sending to OpenAI: {case_summary[:500]}... [Truncated]")
+
     cache_key = f"ai_summary:{hash(case_summary)}"
     cached_summary = redis_client.get(cache_key)
 
@@ -102,7 +108,7 @@ def generate_ai_summary(case):
         logging.info("✅ Cache HIT for AI Summary")
         return cached_summary
 
-    logging.info(f"❌ Cache MISS for AI Summary. Sending request to OpenAI.")
+    logging.info("❌ Cache MISS for AI Summary. Sending request to OpenAI.")
 
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -130,7 +136,7 @@ def generate_ai_summary(case):
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# Case law search endpoint (with filtering & sorting)
+# Case law search endpoint (with AI summaries using full case text)
 @app.get("/search")
 @limiter.limit("10/minute")
 async def search_case_law(request: Request, query: str):
