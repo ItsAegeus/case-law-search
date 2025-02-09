@@ -78,8 +78,8 @@ def generate_ai_summary(case_summary: str, retry_count=0) -> str:
         return "AI Analysis not available (missing API key)."
 
     if not case_summary.strip():
-        logging.warning("⚠️ Empty case summary received. Skipping AI generation.")
-        return "AI Summary Not Available"
+        logging.warning("⚠️ Empty case summary received. Using fallback response.")
+        return "AI Summary Not Available. This case may lack a public summary."
 
     cache_key = f"ai_summary:{hash(case_summary)}"
     cached_summary = redis_client.get(cache_key)
@@ -105,15 +105,15 @@ def generate_ai_summary(case_summary: str, retry_count=0) -> str:
 
         summary = response.choices[0].message.content.strip()
 
-        if not summary and retry_count < 2:  # Retry up to 2 times if summary is empty
-            logging.warning(f"⚠️ OpenAI returned empty summary. Retrying (Attempt {retry_count + 2})...")
+        if not summary and retry_count < 2:  # Retry if OpenAI returns empty
+            logging.warning(f"⚠️ OpenAI returned an empty summary. Retrying (Attempt {retry_count + 2})...")
             return generate_ai_summary(case_summary, retry_count + 1)
 
-        if not summary:  # If still empty after retries, return fallback message
+        if not summary:  # If still empty after retries, return a fallback summary
             logging.error("❌ OpenAI failed to generate a summary after retries.")
-            return "AI Summary Not Available"
+            return "AI Summary Not Available. This case may require manual review."
 
-        redis_client.setex(cache_key, 86400, summary)  # Cache summary for 24 hours
+        redis_client.setex(cache_key, 86400, summary)  # Cache for 24 hours
         return summary
 
     except Exception as e:
@@ -142,7 +142,7 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
     elif sort == "date_asc":
         results.sort(key=lambda x: x.get("dateFiled", "9999-99-99"))
 
-    # Ensure Correct Field Mapping & AI Summary Generation
+    # Generate AI Summaries (Only if a case summary exists)
     formatted_results = []
     for case in results:
         formatted_results.append({
