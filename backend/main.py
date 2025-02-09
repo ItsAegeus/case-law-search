@@ -129,7 +129,20 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
     elif sort == "date_asc":
         results.sort(key=lambda x: x.get("dateFiled", "9999-99-99"))
 
-    return JSONResponse(content={"message": f"{len(results)} case(s) found for query: {query}", "results": results})
+    # 🔹 Ensure Correct Field Mapping
+    formatted_results = []
+    for case in results:
+        formatted_results.append({
+            "Case Name": case.get("caseName") or "Unknown Case",
+            "Citation": case.get("citation") or "No Citation Available",
+            "Court": case.get("court") or "Unknown Court",
+            "Date Decided": case.get("dateFiled") or "No Date Available",
+            "Summary": case.get("summary") or "No Summary Available",
+            "AI Summary": generate_ai_summary(case.get("summary", "")) if case.get("summary") else "AI Summary Not Available",
+            "Full Case": case.get("absolute_url") or "#"
+        })
+
+    return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
 
 # Start FastAPI with Uvicorn
 if __name__ == "__main__":
