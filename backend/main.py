@@ -56,14 +56,15 @@ def fetch_case_law(query: str):
 
     logging.info(f"❌ Cache MISS for: {query}. Fetching from API...")
 
-    url = f"https://www.courtlistener.com/api/rest/v4/search/?q={query}"
+    url = f"https://www.courtlistener.com/api/rest/v3/opinions/?search={query}&format=json"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
 
-        # 🔹 Log CourtListener's response for debugging
-        logging.info(f"📜 CourtListener Response: {json.dumps(data, indent=2)[:1000]}... [Truncated]")
+        if not data.get("results"):
+            logging.warning("⚠️ No case results returned from CourtListener API.")
+            return {"error": "No cases found."}
 
         redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
         return data
@@ -85,7 +86,7 @@ def generate_ai_summary(case):
     if not case_summary:
         opinion_id = case.get("id")
         if opinion_id:
-            api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
+            api_url = f"https://www.courtlistener.com/api/rest/v3/opinions/{opinion_id}/"
             logging.info(f"📥 Fetching full case text from API: {api_url}")
             try:
                 response = requests.get(api_url)
