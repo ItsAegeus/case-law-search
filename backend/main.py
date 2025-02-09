@@ -159,10 +159,11 @@ async def search_case_law(request: Request, query: str):
 
     formatted_results = []
     for case in results:
+        citation = case.get("citation", [])
         formatted_results.append({
             "Case Name": case.get("caseName") or "Unknown Case",
-            "Citation": case.get("citation") or "No Citation Available",
-            "Court": case.get("court") or "Unknown Court",
+            "Citation": citation[0] if isinstance(citation, list) and citation else "No Citation Available",
+            "Court": case.get("court", {}).get("name", "Unknown Court"),
             "Date Decided": case.get("dateFiled") or "No Date Available",
             "Summary": case.get("summary") or "No Summary Available",
             "AI Summary": generate_ai_summary(case),
