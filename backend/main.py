@@ -44,7 +44,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_frontend():
     return FileResponse("static/index.html")
 
-# Function to fetch case law from CourtListener API (logs response)
+# Function to fetch case law from CourtListener API
 def fetch_case_law(query: str):
     """Fetches case law data from CourtListener API with Redis caching and logs data."""
     cache_key = f"case_law:{query}"
@@ -62,8 +62,9 @@ def fetch_case_law(query: str):
         response.raise_for_status()
         data = response.json()
 
-        # 🔹 Log CourtListener's response for debugging
-        logging.info(f"📜 CourtListener Response: {json.dumps(data, indent=2)[:1000]}... [Truncated]")
+        # 🔹 Log first case response for debugging
+        if data.get("results"):
+            logging.info(f"📜 First Case Data: {json.dumps(data['results'][0], indent=2)}")
 
         redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
         return data
@@ -153,24 +154,20 @@ async def search_case_law(request: Request, query: str):
     raw_data = fetch_case_law(query)
 
     if "error" in raw_data:
-        logging.error("❌ API Fetch Error:", raw_data)
+        logging.error(f"❌ API Fetch Error: {raw_data}")
         return JSONResponse(content={"message": "Failed to fetch case law", "results": []}, status_code=500)
 
     results = raw_data.get("results", [])
-
-    # 🔹 Log entire first case for debugging
-    if results:
-        logging.info(f"📜 First Case Data: {json.dumps(results[0], indent=2)}")
 
     formatted_results = []
     for case in results:
         try:
             logging.info(f"🧐 Processing Case Data: {case}")  # DEBUG LOG
 
-            # Ensure 'case' is a dictionary
+            # Ensure 'case' is a dictionary before using `.get()`
             if not isinstance(case, dict):
-                logging.error(f"❌ Expected dict but got {type(case)}: {case}")
-                continue  # Skip this bad entry
+                logging.error(f"❌ Unexpected Data Type ({type(case)}): {case}")
+                continue  # Skip invalid entries
 
             citation = case.get("citation", [])
             formatted_results.append({
