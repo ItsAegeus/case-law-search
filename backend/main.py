@@ -157,6 +157,12 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
 
+@app.delete("/clear-cache")
+async def clear_cache():
+    """Clears Redis cache (AI summaries & search results)."""
+    redis_client.flushall()
+    return {"message": "✅ Redis cache cleared successfully!"}
+
 # Start FastAPI with Uvicorn
 if __name__ == "__main__":
     import uvicorn
