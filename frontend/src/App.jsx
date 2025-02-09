@@ -1,54 +1,30 @@
 import { useState } from "react";
 import axios from "axios";
 
-function App() {
+const SearchBar = () => {
   const [query, setQuery] = useState("");
-  const [cases, setCases] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]);
 
-  const searchCases = async () => {
-    if (!query.trim()) {
-      setError("Please enter a search term.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
+  const fetchCases = async (q) => {
+    if (!q) return;
     try {
-      const response = await axios.get(`https://your-railway-url/search?query=${encodeURIComponent(query)}`);
-      if (response.data.error) {
-        setError(response.data.error);
-      } else {
-        setCases(response.data.cases);
-      }
-    } catch (err) {
-      setError("Failed to fetch case data.");
-    } finally {
-      setLoading(false);
+      const { data } = await axios.get(`/search?query=${q}`);
+      setResults(data.results);
+    } catch (error) {
+      console.error("Error fetching cases:", error);
     }
   };
 
+  let timeout;
+  const handleInputChange = (e) => {
+    setQuery(e.target.value);
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fetchCases(e.target.value), 500); // 500ms debounce
+  };
+
   return (
-    <div style={{ textAlign: "center", padding: "20px" }}>
-      <h1>Case Law Search</h1>
-      <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Enter a legal scenario"/>
-      <button onClick={searchCases}>Search</button>
-
-      {loading && <p>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      <div>
-        {cases.map((caseLaw, index) => (
-          <div key={index}>
-            <h3>{caseLaw.case_name}</h3>
-            <p>{caseLaw.summary}</p>
-          </div>
-        ))}
-      </div>
-    </div>
+    <input type="text" value={query} onChange={handleInputChange} placeholder="Search case law..." />
   );
-}
+};
 
-export default App;
+export default SearchBar;
