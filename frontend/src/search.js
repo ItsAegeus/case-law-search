@@ -44,12 +44,44 @@ const Search = () => {
 
       {/* Filters */}
       <div className="filters">
-        {/* Court Filter */}
         <select onChange={(e) => setCourt(e.target.value)}>
           <option value="">All Courts</option>
           <option value="supreme">Supreme Court</option>
           <option value="appeals">Appeals Court</option>
         </select>
 
-        {/* Sorting Dropdown */}
         <select onChange={(e) => setSort(e.target.value)}>
+          <option value="relevance">Relevance</option>
+          <option value="date_desc">Newest First</option>
+          <option value="date_asc">Oldest First</option>
+        </select>
+      </div>
+
+      {/* Loading Bar */}
+      {loading && <div className="loading-bar"></div>}
+
+      {/* Search Results */}
+      <div className="results">
+        {results.length > 0 ? (
+          results.map((caseItem, index) => (
+            <div key={index} className="case-card">
+              <h3>{caseItem["Case Name"] || "Unknown Case"}</h3>
+              <p><strong>📜 Citation:</strong> {caseItem.Citation || "No Citation Available"}</p>
+              <p><strong>⚖️ Court:</strong> {caseItem.Court || "Unknown Court"}</p>
+              <p><strong>📅 Date Decided:</strong> {caseItem["Date Decided"] || "No Date Available"}</p>
+              <p><strong>📝 Summary:</strong> {caseItem.Summary || "No Summary Available"}</p>
+              <p><strong>🤖 AI Summary:</strong> {caseItem["AI Summary"] || "AI Summary Not Available"}</p>
+              <a href={caseItem["Full Case"] || "#"} target="_blank" rel="noopener noreferrer">
+                🔗 Read Full Case
+              </a>
+            </div>
+          ))
+        ) : (
+          !loading && <p className="no-results">No results found.</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default Search;
