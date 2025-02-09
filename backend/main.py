@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
-from bs4 import BeautifulSoup  # Import BeautifulSoup for case text extraction
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -72,9 +71,9 @@ def fetch_case_law(query: str):
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI summaries using full case text if summary is missing
+# Function to generate AI summaries using CourtListener API full case text
 def generate_ai_summary(case):
-    """Generates AI summaries using full case text if summary is missing."""
+    """Generates AI summaries using full case text from CourtListener API."""
     
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
@@ -82,27 +81,25 @@ def generate_ai_summary(case):
 
     case_summary = case.get("summary", "").strip()
 
-    # 🔹 If no summary, try scraping the full case text
+    # 🔹 If no summary, fetch full case text via API
     if not case_summary:
-        full_case_url = case.get("absolute_url")
-        if full_case_url:
-            full_case_url = f"https://www.courtlistener.com{full_case_url}"
-            logging.info(f"📥 Fetching full case text from: {full_case_url}")
+        opinion_id = case.get("id")  # Get the case ID from API response
+        if opinion_id:
+            api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
+            logging.info(f"📥 Fetching full case text from API: {api_url}")
             try:
-                response = requests.get(full_case_url)
+                response = requests.get(api_url)
                 response.raise_for_status()
-
-                # Extract case text using BeautifulSoup
-                soup = BeautifulSoup(response.text, "html.parser")
-                paragraphs = soup.find_all("p")
-                case_summary = "\n".join([p.get_text() for p in paragraphs])[:2000]  # Limit to 2000 chars
+                opinion_data = response.json()
+                
+                case_summary = opinion_data.get("plain_text", "")[:2000]  # Use first 2000 characters
 
                 if not case_summary.strip():
-                    logging.warning("⚠️ Full case text is empty after scraping.")
+                    logging.warning("⚠️ Full case text is empty from API.")
                     return "AI Summary Not Available (No case text found)."
 
             except requests.exceptions.RequestException as e:
-                logging.error(f"❌ Failed to fetch full case text: {str(e)}")
+                logging.error(f"❌ Failed to fetch full case text from API: {str(e)}")
                 return "AI Summary Not Available (Failed to fetch full case text)."
 
     if not case_summary.strip():
@@ -168,7 +165,8 @@ async def search_case_law(request: Request, query: str):
             "Date Decided": case.get("dateFiled") or "No Date Available",
             "Summary": case.get("summary") or "No Summary Available",
             "AI Summary": generate_ai_summary(case),
-            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}"
+            "Full Case": f"https://www.courtlistener.com{case.get('absolute_url', '')}",
+            "id": case.get("id")  # 🔹 Include case ID for API fetching
         })
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
