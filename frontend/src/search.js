@@ -6,6 +6,8 @@ const Search = () => {
   const [query, setQuery] = useState(""); // Search input
   const [results, setResults] = useState([]); // Search results
   const [loading, setLoading] = useState(false); // Loading state
+  const [court, setCourt] = useState(""); // Court filter
+  const [sort, setSort] = useState("relevance"); // Sorting option
 
   const handleSearch = async () => {
     if (!query.trim()) return; // Prevent empty searches
@@ -15,21 +17,21 @@ const Search = () => {
 
     try {
       const response = await axios.get(
-        `https://case-law-search-production.up.railway.app/search?query=${query}`
+        `https://case-law-search-production.up.railway.app/search?query=${query}&court=${court}&sort=${sort}`
       );
       setResults(response.data.results);
     } catch (error) {
       console.error("❌ Error fetching case law:", error);
     }
 
-    setLoading(false); // Hide loading bar
+    setLoading(false); // Hide loading bar after request
   };
 
   return (
     <div className="search-container">
       <h1>🔍 Case Law Search</h1>
-      
-      {/* Search Input & Button */}
+
+      {/* Search Bar */}
       <div className="search-bar">
         <input
           type="text"
@@ -40,29 +42,14 @@ const Search = () => {
         <button onClick={handleSearch}>Search</button>
       </div>
 
-      {/* Loading Bar */}
-      {loading && <div className="loading-bar"></div>}
+      {/* Filters */}
+      <div className="filters">
+        {/* Court Filter */}
+        <select onChange={(e) => setCourt(e.target.value)}>
+          <option value="">All Courts</option>
+          <option value="supreme">Supreme Court</option>
+          <option value="appeals">Appeals Court</option>
+        </select>
 
-      {/* Search Results */}
-      <div className="results">
-        {results.length > 0 ? (
-          results.map((caseItem, index) => (
-            <div key={index} className="case-card">
-              <h3>{caseItem["Case Name"]}</h3>
-              <p><strong>Court:</strong> {caseItem.Court}</p>
-              <p><strong>Date:</strong> {caseItem["Date Decided"]}</p>
-              <p><strong>AI Summary:</strong> {caseItem["AI Summary"]}</p>
-              <a href={caseItem["Full Case"]} target="_blank" rel="noopener noreferrer">
-                📖 Read Full Case
-              </a>
-            </div>
-          ))
-        ) : (
-          !loading && <p className="no-results">No results found.</p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default Search;
+        {/* Sorting Dropdown */}
+        <select onChange={(e) => setSort(e.target.value)}>
