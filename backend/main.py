@@ -52,7 +52,7 @@ def fetch_case_law(query: str):
 
     if cached_data:
         logging.info(f"✅ Cache HIT for: {query}")
-        return json.loads(cached_data)  # Return cached result
+        return json.loads(cached_data)
 
     logging.info(f"❌ Cache MISS for: {query}. Fetching from API...")
 
@@ -62,24 +62,38 @@ def fetch_case_law(query: str):
         response.raise_for_status()
         data = response.json()
 
-        # Store in Redis with a 10-minute expiration
-        redis_client.setex(cache_key, 600, json.dumps(data))
+        redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
         return data
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI case summaries with retry mechanism
-def generate_ai_summary(case_summary: str, retry_count=0) -> str:
-    """Generates AI summaries with retries if OpenAI returns an empty response."""
+# Function to generate AI summaries using full case text if summary is missing
+def generate_ai_summary(case):
+    """Generates AI summaries using full case text if summary is missing."""
     
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
 
+    # Use the full case text if summary is missing
+    case_summary = case.get("summary", "").strip()
+    
+    if not case_summary:
+        full_case_url = case.get("full_case")
+        if full_case_url and "courtlistener.com" in full_case_url:
+            logging.info(f"📥 Fetching full case text from: {full_case_url}")
+            try:
+                response = requests.get(full_case_url)
+                response.raise_for_status()
+                case_summary = response.text[:2000]  # Limit to first 2000 chars
+            except requests.exceptions.RequestException as e:
+                logging.error(f"❌ Failed to fetch full case text: {str(e)}")
+                return "AI Summary Not Available (Failed to fetch full case text)."
+
     if not case_summary.strip():
-        logging.warning("⚠️ Empty case summary received. Using fallback response.")
-        return "AI Summary Not Available. This case may lack a public summary."
+        logging.warning("⚠️ No usable case summary or text found.")
+        return "AI Summary Not Available."
 
     cache_key = f"ai_summary:{hash(case_summary)}"
     cached_summary = redis_client.get(cache_key)
@@ -88,7 +102,7 @@ def generate_ai_summary(case_summary: str, retry_count=0) -> str:
         logging.info("✅ Cache HIT for AI Summary")
         return cached_summary
 
-    logging.info(f"❌ Cache MISS for AI Summary. Attempt {retry_count + 1}")
+    logging.info(f"❌ Cache MISS for AI Summary. Sending request to OpenAI.")
 
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -105,13 +119,9 @@ def generate_ai_summary(case_summary: str, retry_count=0) -> str:
 
         summary = response.choices[0].message.content.strip()
 
-        if not summary and retry_count < 2:  # Retry if OpenAI returns empty
-            logging.warning(f"⚠️ OpenAI returned an empty summary. Retrying (Attempt {retry_count + 2})...")
-            return generate_ai_summary(case_summary, retry_count + 1)
-
-        if not summary:  # If still empty after retries, return a fallback summary
-            logging.error("❌ OpenAI failed to generate a summary after retries.")
-            return "AI Summary Not Available. This case may require manual review."
+        if not summary:
+            logging.error("❌ OpenAI failed to generate a summary.")
+            return "AI Summary Not Available."
 
         redis_client.setex(cache_key, 86400, summary)  # Cache for 24 hours
         return summary
@@ -123,8 +133,8 @@ def generate_ai_summary(case_summary: str, retry_count=0) -> str:
 # Case law search endpoint (with filtering & sorting)
 @app.get("/search")
 @limiter.limit("10/minute")
-async def search_case_law(request: Request, query: str, court: str = None, sort: str = "relevance"):
-    """Handles search requests with filtering, sorting, and AI summaries."""
+async def search_case_law(request: Request, query: str):
+    """Handles search requests with AI summaries using full case text if needed."""
     raw_data = fetch_case_law(query)
 
     if "error" in raw_data:
@@ -132,17 +142,6 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
 
     results = raw_data.get("results", [])
 
-    # Apply Court Filtering
-    if court:
-        results = [case for case in results if case.get("court", "").lower() == court.lower()]
-
-    # Apply Sorting
-    if sort == "date_desc":
-        results.sort(key=lambda x: x.get("dateFiled", "0000-00-00"), reverse=True)
-    elif sort == "date_asc":
-        results.sort(key=lambda x: x.get("dateFiled", "9999-99-99"))
-
-    # Generate AI Summaries (Only if a case summary exists)
     formatted_results = []
     for case in results:
         formatted_results.append({
@@ -151,17 +150,11 @@ async def search_case_law(request: Request, query: str, court: str = None, sort:
             "Court": case.get("court") or "Unknown Court",
             "Date Decided": case.get("dateFiled") or "No Date Available",
             "Summary": case.get("summary") or "No Summary Available",
-            "AI Summary": generate_ai_summary(case.get("summary", "")) if case.get("summary") else "AI Summary Not Available",
+            "AI Summary": generate_ai_summary(case),
             "Full Case": case.get("absolute_url") or "#"
         })
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
-
-@app.delete("/clear-cache")
-async def clear_cache():
-    """Clears Redis cache (AI summaries & search results)."""
-    redis_client.flushall()
-    return {"message": "✅ Redis cache cleared successfully!"}
 
 # Start FastAPI with Uvicorn
 if __name__ == "__main__":
