@@ -107,31 +107,27 @@ def generate_ai_summary(case_summary: str) -> str:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# Case law search endpoint (with rate limiting)
+# Case law search endpoint (with filtering & sorting)
 @app.get("/search")
 @limiter.limit("10/minute")  # Max 10 searches per minute per user
-async def search_case_law(request: Request, query: str):
-    """Handles search requests and returns case law data."""
+async def search_case_law(request: Request, query: str, court: str = None, sort: str = "relevance"):
+    """Handles search requests with filtering and sorting."""
     raw_data = fetch_case_law(query)
 
     if "error" in raw_data:
         return JSONResponse(content={"message": "Failed to fetch case law", "results": []}, status_code=500)
 
-    results = []
-    for case in raw_data.get("results", []):
-        summary_text = case.get("summary", "No summary available")
-        ai_summary = generate_ai_summary(summary_text) if summary_text else "AI Summary Not Available"
+    results = raw_data.get("results", [])
 
-        case_data = {
-            "Case Name": case.get("caseName", "Unknown Case"),
-            "Citation": case.get("citation", "No Citation Available"),
-            "Court": case.get("court", "Unknown Court"),
-            "Date Decided": case.get("dateFiled", "No Date Available"),
-            "Summary": summary_text,
-            "AI Summary": ai_summary,
-            "Full Case": case.get("absolute_url", "#")
-        }
-        results.append(case_data)
+    # 🔹 Apply Court Filtering
+    if court:
+        results = [case for case in results if case.get("court", "").lower() == court.lower()]
+
+    # 🔹 Apply Sorting
+    if sort == "date_desc":
+        results.sort(key=lambda x: x.get("dateFiled", "0000-00-00"), reverse=True)
+    elif sort == "date_asc":
+        results.sort(key=lambda x: x.get("dateFiled", "9999-99-99"))
 
     return JSONResponse(content={"message": f"{len(results)} case(s) found for query: {query}", "results": results})
 
