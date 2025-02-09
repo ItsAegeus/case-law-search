@@ -72,80 +72,6 @@ def fetch_case_law(query: str):
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI summaries using full case text from CourtListener API
-def generate_ai_summary(case):
-    """Generates AI summaries by correctly extracting full case text from CourtListener API."""
-    
-    if not OPENAI_API_KEY:
-        logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
-        return "AI Analysis not available (missing API key)."
-
-    case_summary = case.get("summary", "").strip()
-
-    # 🔹 If no summary, fetch full case text via API
-    if not case_summary:
-        opinion_id = case.get("id")
-        if opinion_id:
-            api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
-            logging.info(f"📥 Fetching full case text from API: {api_url}")
-            try:
-                response = requests.get(api_url)
-                response.raise_for_status()
-                opinion_data = response.json()
-
-                # ✅ Extract the full case text correctly
-                case_summary = opinion_data.get("plain_text", "").strip()
-
-                if not case_summary:
-                    logging.warning("⚠️ API returned empty plain_text field.")
-                    return "AI Summary Not Available (No case text found)."
-
-            except requests.exceptions.RequestException as e:
-                logging.error(f"❌ Failed to fetch full case text from API: {str(e)}")
-                return "AI Summary Not Available (Failed to fetch full case text)."
-
-    if not case_summary.strip():
-        logging.warning("⚠️ No usable case summary or text found.")
-        return "AI Summary Not Available."
-
-    # 🔹 Log what is actually being sent to OpenAI
-    logging.info(f"✅ Case Text Extracted (First 500 chars): {case_summary[:500]}...")
-
-    cache_key = f"ai_summary:{hash(case_summary)}"
-    cached_summary = redis_client.get(cache_key)
-
-    if cached_summary:
-        logging.info("✅ Cache HIT for AI Summary")
-        return cached_summary
-
-    logging.info("❌ Cache MISS for AI Summary. Sending request to OpenAI.")
-
-    try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-        response = client.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": "You are a legal AI assistant that summarizes case law."},
-                {"role": "user", "content": f"Summarize this legal case:\n\n{case_summary}"}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-
-        summary = response.choices[0].message.content.strip()
-
-        if not summary:
-            logging.error("❌ OpenAI failed to generate a summary.")
-            return "AI Summary Not Available."
-
-        redis_client.setex(cache_key, 86400, summary)  # Cache for 24 hours
-        return summary
-
-    except Exception as e:
-        logging.error(f"❌ OpenAI API Error: {str(e)}")
-        return "AI Analysis unavailable due to an API error."
-
 # Case law search endpoint (with AI summaries using full case text)
 @app.get("/search")
 @limiter.limit("10/minute")
@@ -159,12 +85,27 @@ async def search_case_law(request: Request, query: str):
 
     results = raw_data.get("results", [])
 
+    # 🔹 Debug log: Print raw results
+    if results:
+        logging.info(f"📜 First Case Data Type: {type(results[0])}")
+        logging.info(f"📜 First Case Raw Data: {results[0]}")
+
     formatted_results = []
     for case in results:
         try:
-            logging.info(f"🧐 Processing Case Data: {case}")  # DEBUG LOG
+            logging.info(f"🧐 Processing Case of Type: {type(case)}")  # Logs type of `case`
 
-            # Ensure 'case' is a dictionary before using `.get()`
+            # 🚨 If `case` is a string, attempt to parse it as JSON
+            if isinstance(case, str):
+                logging.warning(f"⚠️ Unexpected String Case Data: {case}")
+                try:
+                    case = json.loads(case)  # Attempt to convert string to dictionary
+                    logging.info("✅ Successfully parsed case data from string to dictionary.")
+                except json.JSONDecodeError:
+                    logging.error(f"❌ Failed to parse case string as JSON: {case}")
+                    continue  # Skip this entry if parsing fails
+
+            # Ensure `case` is a dictionary before proceeding
             if not isinstance(case, dict):
                 logging.error(f"❌ Unexpected Data Type ({type(case)}): {case}")
                 continue  # Skip invalid entries
