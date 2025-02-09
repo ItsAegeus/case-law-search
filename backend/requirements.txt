@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-redis
 requests
-openai
+redis
 slowapi
-beautifulsoup4
+openai
