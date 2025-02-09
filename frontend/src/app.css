@@ -1,4 +1,4 @@
-/* Global Styles */
+/* General Styles */
 body {
   font-family: "Arial", sans-serif;
   background-color: #f8f9fa;
@@ -71,6 +71,26 @@ footer {
   background-color: #0056b3;
 }
 
+/* Filters */
+.filters {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.filters select {
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.filters select:hover {
+  background-color: #f4f4f4;
+}
+
 /* Loading Bar */
 .loading-bar {
   width: 100%;
@@ -125,4 +145,25 @@ footer {
 .no-results {
   color: #777;
   font-style: italic;
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  .search-bar {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .filters {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .search-bar input, .filters select {
+    width: 100%;
+  }
+
+  .case-card {
+    padding: 10px;
+  }
 }
