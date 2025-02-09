@@ -62,7 +62,6 @@ def fetch_case_law(query: str):
         response.raise_for_status()
         data = response.json()
 
-        # 🔹 Log first case response for debugging
         if data.get("results"):
             logging.info(f"📜 First Case Data: {json.dumps(data['results'][0], indent=2)}")
 
@@ -75,7 +74,7 @@ def fetch_case_law(query: str):
 # Function to generate AI summaries using full case text from CourtListener API
 def generate_ai_summary(case):
     """Generates AI summaries by correctly extracting full case text from CourtListener API."""
-    
+
     if not OPENAI_API_KEY:
         logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
@@ -86,35 +85,46 @@ def generate_ai_summary(case):
 
     case_summary = case.get("summary", "").strip()
 
-    # 🔹 Log the case structure before using it
+    # 🔹 Log case structure before using it
     logging.info(f"🔍 AI Summary Function Received Case Data: {json.dumps(case, indent=2)}")
 
-    # 🔹 If no summary, fetch full case text via API
-    if not case_summary:
-        opinion_id = case.get("id")
-        
-        # 🚨 Ensure `opinion_id` exists and is valid
-        if not opinion_id:
-            logging.error("⚠️ AI Summary Skipped: No valid opinion ID found.")
-            return "AI Summary Not Available (No opinion ID)."
+    # ✅ Try extracting `id` from opinions if missing
+    opinion_id = case.get("id")
 
-        api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
-        logging.info(f"📥 Fetching full case text from API: {api_url}")
-        try:
-            response = requests.get(api_url)
-            response.raise_for_status()
-            opinion_data = response.json()
+    if not opinion_id and "opinions" in case:
+        opinions = case["opinions"]
+        if isinstance(opinions, list) and opinions:
+            opinion_id = opinions[0].get("id")  # Get the first opinion ID if available
 
-            # ✅ Extract the full case text correctly
-            case_summary = opinion_data.get("plain_text", "").strip()
+    # 🚨 If still no `id`, fallback to `cluster_id`
+    if not opinion_id:
+        cluster_id = case.get("cluster_id")
+        if cluster_id:
+            logging.warning(f"⚠️ No opinion ID found. Fetching case text using cluster_id: {cluster_id}")
+            opinion_id = cluster_id  # Use cluster_id as a fallback
 
-            if not case_summary:
-                logging.warning("⚠️ API returned empty plain_text field.")
-                return "AI Summary Not Available (No case text found)."
+    if not opinion_id:
+        logging.error("⚠️ AI Summary Skipped: No valid opinion ID found in case or opinions list.")
+        return "AI Summary Not Available (No opinion ID)."
 
-        except requests.exceptions.RequestException as e:
-            logging.error(f"❌ Failed to fetch full case text from API: {str(e)}")
-            return "AI Summary Not Available (Failed to fetch full case text)."
+    # 🔹 Fetch full case text from API
+    api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
+    logging.info(f"📥 Fetching full case text from API: {api_url}")
+
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        opinion_data = response.json()
+
+        case_summary = opinion_data.get("plain_text", "").strip()
+
+        if not case_summary:
+            logging.warning("⚠️ API returned empty plain_text field.")
+            return "AI Summary Not Available (No case text found)."
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Failed to fetch full case text from API: {str(e)}")
+        return "AI Summary Not Available (Failed to fetch full case text)."
 
     if not case_summary.strip():
         logging.warning("⚠️ No usable case summary or text found.")
@@ -195,7 +205,3 @@ async def search_case_law(request: Request, query: str):
             logging.error(f"❌ Error Processing Case [{index}]: {str(e)}")
 
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
