@@ -17,13 +17,17 @@ logging.basicConfig(level=logging.INFO)
 # Load environment variables
 REDIS_URL = os.getenv("REDIS_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+COURTLISTENER_API_KEY = os.getenv("COURTLISTENER_API_KEY")
 
-# Ensure Redis and OpenAI API key are set
+# Ensure Redis and API keys are set
 if not REDIS_URL:
     raise ValueError("❌ REDIS_URL is missing! Set it in Railway environment variables.")
 
 if not OPENAI_API_KEY:
     logging.error("❌ Missing OPENAI_API_KEY! AI summaries will not work.")
+
+if not COURTLISTENER_API_KEY:
+    logging.error("❌ Missing COURTLISTENER_API_KEY! CourtListener API may reject requests.")
 
 # Initialize Redis client
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
@@ -44,7 +48,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_frontend():
     return FileResponse("static/index.html")
 
-# Function to fetch case law from CourtListener API (logs response)
+# Function to fetch case law from CourtListener API
 def fetch_case_law(query: str):
     """Fetches case law data from CourtListener API with Redis caching and logs data."""
     cache_key = f"case_law:{query}"
@@ -56,9 +60,21 @@ def fetch_case_law(query: str):
 
     logging.info(f"❌ Cache MISS for: {query}. Fetching from API...")
 
-    url = f"https://www.courtlistener.com/api/rest/v3/opinions/?search={query}&format=json"
+    if not COURTLISTENER_API_KEY:
+        logging.error("❌ Missing CourtListener API Key! Please set it in Railway.")
+        return {"error": "Missing API Key"}
+
+    url = f"https://www.courtlistener.com/api/rest/v3/opinions/?q={query}&format=json"
+
+    # ✅ Add headers (Authentication + User-Agent)
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Authorization": f"Token {COURTLISTENER_API_KEY}",
+        "Accept": "application/json",
+    }
+
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
 
@@ -68,11 +84,16 @@ def fetch_case_law(query: str):
 
         redis_client.setex(cache_key, 600, json.dumps(data))  # Cache for 10 minutes
         return data
+
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"❌ HTTP Error: {response.status_code} - {response.text}")
+        return {"error": f"Failed to fetch case law (HTTP {response.status_code})"}
+
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ API Error: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI summaries using full case text from CourtListener API
+# Function to generate AI summaries using GPT-4
 def generate_ai_summary(case):
     """Generates AI summaries by correctly extracting full case text from CourtListener API."""
     
@@ -82,7 +103,6 @@ def generate_ai_summary(case):
 
     case_summary = case.get("summary", "").strip()
 
-    # 🔹 If no summary, fetch full case text via API
     if not case_summary:
         opinion_id = case.get("id")
         if opinion_id:
@@ -93,7 +113,6 @@ def generate_ai_summary(case):
                 response.raise_for_status()
                 opinion_data = response.json()
 
-                # ✅ Extract the full case text correctly
                 case_summary = opinion_data.get("plain_text", "").strip()
 
                 if not case_summary:
@@ -108,7 +127,6 @@ def generate_ai_summary(case):
         logging.warning("⚠️ No usable case summary or text found.")
         return "AI Summary Not Available."
 
-    # 🔹 Log what is being sent to OpenAI
     logging.info(f"📜 Sending to OpenAI: {case_summary[:500]}... [Truncated]")
 
     cache_key = f"ai_summary:{hash(case_summary)}"
@@ -146,7 +164,7 @@ def generate_ai_summary(case):
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# Case law search endpoint (with AI summaries using full case text)
+# Case law search endpoint
 @app.get("/search")
 @limiter.limit("10/minute")
 async def search_case_law(request: Request, query: str):
