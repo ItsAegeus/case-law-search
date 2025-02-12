@@ -1,207 +1,149 @@
-import os
-import json
-import logging
-import redis
-import requests
-import openai
-
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+import requests
+import os
+import openai
+import logging
+from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# ✅ Logging Setup
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Load environment variables
-REDIS_URL = os.getenv("REDIS_URL")
+# ✅ Load Environment Variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Ensure Redis and OpenAI API key are set
-if not REDIS_URL:
-    raise ValueError("❌ REDIS_URL is missing! Set it in Railway environment variables.")
-
-if not OPENAI_API_KEY:
-    logging.warning("⚠️ Missing OPENAI_API_KEY! AI summaries will not work.")
-
-# Initialize Redis client
-try:
-    redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
-    redis_client.ping()  # Test Redis connection
-    logging.info("✅ Connected to Redis!")
-except redis.exceptions.ConnectionError:
-    logging.error("❌ Could not connect to Redis. Check REDIS_URL.")
-    redis_client = None  # Prevents crashes if Redis isn't working
-
-# Initialize FastAPI app
+# ✅ Initialize FastAPI App
 app = FastAPI()
 
-# Set up rate limiting (max 10 searches per minute per user)
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(429, _rate_limit_exceeded_handler)
-
-# Mount the static folder for frontend
+# ✅ Serve Static Files (Frontend)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Serve index.html for the frontend
+# ✅ Serve `index.html` for frontend UI
 @app.get("/")
 async def serve_frontend():
     return FileResponse("static/index.html")
 
-# Function to fetch case law from CourtListener API
-def fetch_case_law(query: str):
-    """Fetches case law data from CourtListener API with Redis caching and logs data."""
-    cache_key = f"case_law:{query}"
-    
-    # Check Redis cache
-    if redis_client:
-        cached_data = redis_client.get(cache_key)
-        if cached_data:
-            logging.info(f"✅ Cache HIT for: {query}")
-            return json.loads(cached_data)
+# ✅ Database Setup
+engine = create_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-    logging.info(f"❌ Cache MISS for: {query}. Fetching from API...")
+# ✅ Define Case Law Database Model
+class CaseLaw(Base):
+    __tablename__ = "case_law"
 
-    url = f"https://www.courtlistener.com/api/rest/v4/search/?q={query}"
+    id = Column(Integer, primary_key=True, index=True)
+    query = Column(String, index=True)
+    case_name = Column(String, nullable=False)
+    citation = Column(String, nullable=True)
+    court = Column(String, nullable=True)
+    date_decided = Column(String, nullable=True)
+    summary = Column(Text, nullable=True)
+    full_case_url = Column(String, nullable=True)
+
+# ✅ Create Database Tables
+Base.metadata.create_all(bind=engine)
+
+# ✅ Database Dependency for FastAPI
+def get_db():
+    db = SessionLocal()
     try:
-        response = requests.get(url)
+        yield db
+    finally:
+        db.close()
+
+# ✅ Fetch Case Law from CourtListener API
+def fetch_case_law(query: str):
+    """Fetches case law from CourtListener API."""
+    url = f"https://www.courtlistener.com/api/rest/v4/search/?q={query}&type=o"
+    try:
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
-        data = response.json()
-
-        if "results" in data and data["results"]:
-            logging.info(f"📜 First Case Data: {json.dumps(data['results'][0], indent=2)}")
-
-        # Store in Redis cache (if available)
-        if redis_client:
-            redis_client.setex(cache_key, 600, json.dumps(data))
-
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
-        logging.error(f"❌ API Error: {str(e)}")
+        logging.error(f"❌ Error fetching case law: {str(e)}")
         return {"error": "Failed to fetch case law data"}
 
-# Function to generate AI summaries using full case text from CourtListener API
-def generate_ai_summary(case):
-    """Generates AI summaries by extracting full case text from CourtListener API."""
-
+# ✅ OpenAI AI Summarization Function
+def generate_ai_summary(case_summary: str) -> str:
+    """Uses OpenAI GPT to summarize and analyze case law."""
     if not OPENAI_API_KEY:
-        logging.error("❌ Missing OpenAI API Key. AI summaries won't work.")
         return "AI Analysis not available (missing API key)."
 
-    if not isinstance(case, dict):
-        logging.error(f"❌ AI Summary Error: Expected dictionary but got {type(case)}")
-        return "AI Summary Not Available (Invalid Case Data)."
-
-    case_summary = case.get("summary", "").strip()
-
-    # Try extracting `id` from opinions if missing
-    opinion_id = case.get("id")
-
-    if not opinion_id and "opinions" in case:
-        opinions = case["opinions"]
-        if isinstance(opinions, list) and opinions:
-            opinion_id = opinions[0].get("id")  # Get the first opinion ID if available
-
-    # Fallback to `cluster_id`
-    if not opinion_id:
-        cluster_id = case.get("cluster_id")
-        if cluster_id:
-            logging.warning(f"⚠️ No opinion ID found. Using cluster_id: {cluster_id}")
-            opinion_id = cluster_id
-
-    if not opinion_id:
-        logging.error("⚠️ AI Summary Skipped: No valid opinion ID found.")
-        return "AI Summary Not Available (No opinion ID)."
-
-    # Fetch full case text from API
-    api_url = f"https://www.courtlistener.com/api/rest/v4/opinions/{opinion_id}/"
-    logging.info(f"📥 Fetching full case text from API: {api_url}")
-
     try:
-        response = requests.get(api_url)
-        response.raise_for_status()
-        opinion_data = response.json()
-
-        case_summary = opinion_data.get("plain_text", "").strip()
-
-        if not case_summary:
-            logging.warning("⚠️ API returned empty plain_text field.")
-            return "AI Summary Not Available (No case text found)."
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"❌ Failed to fetch full case text from API: {str(e)}")
-        return "AI Summary Not Available (Failed to fetch full case text)."
-
-    if not case_summary.strip():
-        logging.warning("⚠️ No usable case summary or text found.")
-        return "AI Summary Not Available."
-
-    cache_key = f"ai_summary:{hash(case_summary)}"
-    cached_summary = redis_client.get(cache_key)
-
-    if cached_summary:
-        logging.info("✅ Cache HIT for AI Summary")
-        return cached_summary
-
-    logging.info("❌ Cache MISS for AI Summary. Sending request to OpenAI.")
-
-    try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  
 
         response = client.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
-                {"role": "system", "content": "You are a legal AI assistant that summarizes case law."},
-                {"role": "user", "content": f"Summarize this legal case:\n\n{case_summary}"}
+                {"role": "system", "content": "You are a legal AI assistant that summarizes and explains case law."},
+                {"role": "user", "content": f"Summarize this legal case in simple terms and explain its significance:\n\n{case_summary}"}
             ],
             temperature=0.7,
-            max_tokens=500
+            max_tokens=200,
+            request_timeout=5  # ✅ Prevents long response times
         )
 
-        summary = response.choices[0].message.content.strip()
-
-        if not summary:
-            logging.error("❌ OpenAI failed to generate a summary.")
-            return "AI Summary Not Available."
-
-        redis_client.setex(cache_key, 86400, summary)  # Cache for 24 hours
-        return summary
+        return response.choices[0].message.content.strip()
 
     except Exception as e:
         logging.error(f"❌ OpenAI API Error: {str(e)}")
         return "AI Analysis unavailable due to an API error."
 
-# FastAPI search endpoint
+# ✅ Search Case Law (Only Returns Summarizable Cases)
 @app.get("/search")
-async def search_case_law(request: Request, query: str):
-    """Handles search requests with AI summaries using full case text if needed."""
+async def search_case_law(query: str, db: Session = Depends(get_db)):
+    """Searches case law and returns only cases that can be summarized."""
+
+    # ✅ Fetch Data from CourtListener API
     raw_data = fetch_case_law(query)
 
     if "error" in raw_data:
-        logging.error(f"❌ API Fetch Error: {raw_data}")
         return JSONResponse(content={"message": "Failed to fetch case law", "results": []}, status_code=500)
 
-    results = raw_data.get("results", [])
+    results = []
+    for case in raw_data.get("results", []):
+        summary_text = case.get("summary", "").strip()
 
-    formatted_results = []
-    for index, case in enumerate(results):
-        try:
-            citation = case.get("citation", [])
-            formatted_results.append({
-                "Case Name": case.get("caseName", "Unknown Case"),
-                "Citation": citation[0] if isinstance(citation, list) and citation else "No Citation Available",
-                "AI Summary": generate_ai_summary(case),
-            })
+        # ✅ Ignore cases without valid summaries
+        if not summary_text or summary_text.lower() in ["no summary available", ""]:
+            continue  # Skips cases that cannot be summarized
 
-        except Exception as e:
-            logging.error(f"❌ Error Processing Case [{index}]: {str(e)}")
+        # ✅ Generate AI Summary
+        ai_summary = generate_ai_summary(summary_text)
 
+        case_data = {
+            "Case Name": case.get("caseName", "Unknown Case"),
+            "Citation": case.get("citation", "No Citation Available"),
+            "Court": case.get("court", "Unknown Court"),
+            "Date Decided": case.get("dateFiled", "No Date Available"),
+            "Summary": summary_text,
+            "AI Summary": ai_summary,
+            "Full Case": case.get("absolute_url", "#")
+        }
+        results.append(case_data)
 
-    return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
-    
+        # ✅ Store in Database for Future Queries
+        new_case = CaseLaw(
+            query=query,
+            case_name=case_data["Case Name"],
+            citation=case_data["Citation"],
+            court=case_data["Court"],
+            date_decided=case_data["Date Decided"],
+            summary=case_data["Summary"],
+            full_case_url=case_data["Full Case"]
+        )
+        db.add(new_case)
+
+    db.commit()
+
+    return {"message": f"{len(results)} case(s) found for query: {query}", "results": results}
+
+# ✅ Ensure Uvicorn Starts on Railway Deployment
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
