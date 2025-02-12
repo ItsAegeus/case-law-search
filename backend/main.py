@@ -198,4 +198,10 @@ async def search_case_law(request: Request, query: str):
         except Exception as e:
             logging.error(f"❌ Error Processing Case [{index}]: {str(e)}")
 
+
     return JSONResponse(content={"message": f"{len(formatted_results)} case(s) found", "results": formatted_results})
+    
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
